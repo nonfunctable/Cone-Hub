@@ -85,12 +85,12 @@ local themeStyles = {
         ElementColor = Color3.fromRGB(74, 58, 84)
     },
     Cone = {
-        SchemeColor = Color3.fromRGB(235, 158, 66),
-        Background = Color3.fromRGB(255, 178, 86),
-        Header = Color3.fromRGB(235, 158, 66),
-        TextColor = Color3.fromRGB(255, 255, 255),
-        ElementColor = Color3.fromRGB(171, 178, 206)
-    },
+        SchemeColor = Color3.fromRGB(255, 178, 86),
+        Background = Color3.fromRGB(190,190,190),
+        Header = Color3.fromRGB(178,178,178),
+        TextColor = Color3.fromRGB(255,255,255),
+        ElementColor = Color3.fromRGB(175,175,175)
+    }
   Ocean = {
         SchemeColor = Color3.fromRGB(86, 76, 251),
         Background = Color3.fromRGB(26, 32, 58),
