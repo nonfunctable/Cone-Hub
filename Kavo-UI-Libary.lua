@@ -85,7 +85,7 @@ local themeStyles = {
 		ElementColor = Color3.fromRGB(74, 58, 84)
 	},
       Cone = {
-		SchemeColor = Color3.fromRGB(198, 137, 67),
+		SchemeColor = Color3.fromRGB(218, 151, 73),
 		Background = Color3.fromRGB(44, 44, 44),
 		Header = Color3.fromRGB(31, 31, 31),
 		TextColor = Color3.fromRGB(255,255,255),
