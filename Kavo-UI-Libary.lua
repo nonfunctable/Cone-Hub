@@ -84,7 +84,7 @@ local themeStyles = {
 		TextColor = Color3.fromRGB(255,255,255),
 		ElementColor = Color3.fromRGB(74, 58, 84)
 	},
-      Cone = {
+      BlackCone = {
 		SchemeColor = Color3.fromRGB(218, 151, 73),
 		Background = Color3.fromRGB(44, 44, 44),
 		Header = Color3.fromRGB(31, 31, 31),
@@ -166,8 +166,8 @@ function Kavo.CreateLib(kavName, themeList)
 		themeList = themeStyles.BloodTheme
 	elseif themeList == "GrapeTheme" then
 		themeList = themeStyles.GrapeTheme
-	elseif themeList == "Cone" then
-		themeList = themeStyles.Cone
+	elseif themeList == "BlackCone" then
+		themeList = themeStyles.BlackCone
 	elseif themeList == "Ocean" then
 		themeList = themeStyles.Ocean
 	elseif themeList == "Midnight" then
