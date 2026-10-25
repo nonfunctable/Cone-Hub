@@ -26,11 +26,22 @@ local SaveManager = {} do
 		},
 		Dropdown = {
 			Save = function(idx, object)
-				return { type = "Dropdown", idx = idx, value = object.Value, mutli = object.Multi }
+				return {
+					type = "Dropdown",
+					idx = idx,
+					value = object.Value,
+					mutli = object.Multi,
+					ordered = object.Ordered,
+					order = object.Ordered and object.Order or nil
+				}
 			end,
 			Load = function(idx, data)
 				if SaveManager.Options[idx] then 
-					SaveManager.Options[idx]:SetValue(data.value)
+					if data.ordered and type(data.order) == "table" and #data.order > 0 then
+						SaveManager.Options[idx]:SetValue(data.order)
+					else
+						SaveManager.Options[idx]:SetValue(data.value)
+					end
 				end
 			end,
 		},
