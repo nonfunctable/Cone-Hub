@@ -78,7 +78,8 @@ end
 -- STATE & HUMANIZATION SETTINGS
 
 local State = {
-    Running = false,
+    Running = true,
+    LoopActive = false,
     AutoQueue = true,
     QueueSubmode = "Solo",
     AutoBridge = false,
@@ -92,7 +93,7 @@ local State = {
     HealThreshold = 48,
     MinCPS = 8.0,
     MaxCPS = 12.0,
-    StatusText = "Ready",
+    StatusText = "Running",
     SpawnAnchorPos = nil,
     LastAttackAt = 0,
     LastQueueAt = 0,
@@ -101,6 +102,7 @@ local State = {
     LastStrafeSwitch = 0,
     IsEatingGapple = false,
     IsMiningBlock = false,
+    PendingJump = false,
     DesiredMoveTarget = nil,
     DesiredAimTarget = nil,
     WTapUntil = 0,
@@ -195,11 +197,19 @@ local function disableAutoPlace()
 end
 
 local function disableEdgeSneak()
+    if LocalPlayer:GetAttribute("ClientSneaking") then
+        pcall(function()
+            LocalPlayer:SetAttribute("ClientSneaking", false)
+        end)
+    end
     local char = LocalPlayer.Character
     if char and char:GetAttribute("ClientSneaking") then
         pcall(function()
             char:SetAttribute("ClientSneaking", false)
         end)
+    end
+    if EntityModule and EntityModule.LocalEntity and EntityModule.LocalEntity.IsSneaking then
+        EntityModule.LocalEntity.IsSneaking = false
     end
 end
 
@@ -636,11 +646,13 @@ local function handleObstaclesAndMining(moveDir)
     if hitChest and isGoalPart(hitChest.Instance) then return false end
 
     if hitKnee and not hitChest and not hitHead then
+        State.PendingJump = true
         hum.Jump = true
         return false
     end
 
     if (hitChest or hitKnee) and not hitHead then
+        State.PendingJump = true
         hum.Jump = true
     end
 
@@ -801,13 +813,22 @@ local function stepRenderMovement()
         moveDir = -moveDir * 0.25
     end
 
+    pcall(function()
+        LocalPlayer:Move(moveDir, false)
+    end)
     hum:Move(moveDir, false)
+
+    if State.PendingJump then
+        State.PendingJump = false
+        hum.Jump = true
+    end
 end
 
 pcall(function()
     RunService:UnbindFromRenderStep("BridgeDuelsLegitMove")
 end)
-RunService:BindToRenderStep("BridgeDuelsLegitMove", Enum.RenderPriority.Character.Value + 1, stepRenderMovement)
+RunService:BindToRenderStep("BridgeDuelsLegitMove", Enum.RenderPriority.Input.Value + 15, stepRenderMovement)
+local heartbeatMoveConn = RunService.Heartbeat:Connect(stepRenderMovement)
 
 local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
     task.spawn(function()
@@ -998,6 +1019,7 @@ local function stepStrategicBrain()
         handleObstaclesAndMining(flatDir)
 
         if horizDistToGoal > 4.5 and horizDistToGoal <= 12.0 and hrp.Position.Y <= 24 then
+            State.PendingJump = true
             hum.Jump = true
         end
     elseif enemy and enemy.RootPart then
@@ -1009,6 +1031,18 @@ local function stepStrategicBrain()
         placeBridgeBlockAhead(flatDir)
         handleObstaclesAndMining(flatDir)
     end
+end
+
+local function startStrategicLoop()
+    if State.LoopActive then return end
+    State.LoopActive = true
+    task.spawn(function()
+        while State.Running do
+            pcall(stepStrategicBrain)
+            task.wait(0.06)
+        end
+        State.LoopActive = false
+    end)
 end
 
 -- FLUENT UI WINDOW & TABS
@@ -1032,30 +1066,27 @@ local Tabs = {
 
 StatusParagraph = Tabs.Main:AddParagraph({
     Title = "Strategic Bot Status",
-    Content = "Ready — Enable Legit Auto-Play to automatically queue, sprint the bridge, duel, and dive into the enemy goal.",
+    Content = "Running — Automatically queuing, sprinting the bridge, dueling, and diving into the enemy goal.",
 })
 
 local MasterToggle = Tabs.Main:AddToggle("MasterAutoPlay", {
     Title = "Enable Legit Strategic Auto-Play",
     Description = "Runs full Hypixel Bridge strategy (Sprint Bridge, Native Sword Duel + W-Tap, Defense Mining, and Physical Goal Diving).",
-    Default = false,
+    Default = true,
 })
 
 MasterToggle:OnChanged(function(val)
     State.Running = val
     disableAutoPlace()
     if val then
-        task.spawn(function()
-            while State.Running do
-                pcall(stepStrategicBrain)
-                task.wait(0.06)
-            end
-        end)
+        startStrategicLoop()
     else
         State.DesiredMoveTarget = nil
         setStatus("Paused.")
     end
 end)
+
+startStrategicLoop()
 
 local QueueToggle = Tabs.Main:AddToggle("AutoQueueToggle", {
     Title = "Auto-Queue Next Match",
@@ -1211,6 +1242,9 @@ env.__BridgeDuelsAutoCleanup = function()
     pcall(function()
         RunService:UnbindFromRenderStep("BridgeDuelsLegitMove")
     end)
+    if heartbeatMoveConn then
+        pcall(function() heartbeatMoveConn:Disconnect() end)
+    end
     if charAddedConn then
         pcall(function() charAddedConn:Disconnect() end)
     end
