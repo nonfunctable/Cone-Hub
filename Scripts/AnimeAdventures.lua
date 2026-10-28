@@ -1,4 +1,3 @@
--- ANIME ADVENTURES: APRIL FOOLS ("FOOL'S HUNT" / april2_event) FULL AUTO-PLAY
 local ALLOWED_APRIL_FOOLS_USERNAME = (getgenv and getgenv().AA_ALLOWED_USERNAME) or nil
 local ANIME_ADVENTURES_GAME_ID = 3183403065
 local LOBBY_PLACE_ID = 8304191830
@@ -21,7 +20,6 @@ end
 
 local SESSION_FILE = "aa_april_fools_session.json"
 
--- CORE LIBRARY & MODULE RECOVERY
 local AnimeAdventures = getgenv().AnimeAdventures or {}
 getgenv().AnimeAdventures = AnimeAdventures
 
@@ -134,12 +132,11 @@ function AnimeAdventures.joinAndStartAprilFools(useMatchmaking)
 	return joined, started
 end
 
--- CONSTANTS, CONFIGURATION & SCORING TABLES
 local DEFAULT_CONFIG = {
-	USE_ASTRAL_SUMMON = true, -- Toggle true on main accounts with strong equipped carries; false immediately discards Astral Gate/Summon
-	STAGGER_BUFF_ACTIVES = true, -- Stagger Erwin / Wendy / Leafy active buffs (~15.2s apart) for continuous buff uptime
-	SMART_TIMESTOP = true, -- Hold Homura (Shadowgirl) / Esdeath / Gojo / Dio timestop until enemies are inside DPS range
-	RETURN_TO_LOBBY = true, -- Teleport back to Lobby (teleport_back_to_lobby) when match finishes instead of voting replay
+	USE_ASTRAL_SUMMON = true,
+	STAGGER_BUFF_ACTIVES = true,
+	SMART_TIMESTOP = true,
+	RETURN_TO_LOBBY = true,
 }
 
 local function getConfig()
@@ -320,7 +317,6 @@ local function scoreRoguelikeText(text)
 	return score
 end
 
--- PATH, MULTI-LANE CONVERGENCE SCORING, LEAK DETECTION & PLACEMENT ENGINE
 local function extractLaneWaypoints(laneFolder)
 	local pts = {}
 	if not laneFolder then
@@ -372,7 +368,6 @@ local function buildDensePathSamples(lanesList)
 	if not lanesList or #lanesList == 0 then
 		lanesList = getAllLanesWaypoints()
 	end
-	-- Allow passing a single waypoint array for backwards compatibility
 	if #lanesList > 0 and typeof(lanesList[1]) == "Vector3" then
 		lanesList = { lanesList }
 	end
@@ -637,7 +632,6 @@ local function scorePlacementCoverage(pos, denseSamples, effRange, mode, targetW
 		end
 	end
 	if (numLanes or 1) >= 2 and lanesHitCount >= numLanes then
-		-- Huge bonus when a placement spot covers ALL lanes (where the paths meet)!
 		score = score * 2.4
 	end
 	return score
@@ -660,7 +654,6 @@ local function isNearFailedPosition(pos, failedPositions, radius)
 end
 
 local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPositions, leakPos, fusionPartnerPos, preferNearHill)
-	-- mode: "front" (max path coverage / multi-lane convergence hub), "anchor" (mid-back lane), "leak" (ahead of leaking enemy/boss), "farm" (back out of the way)
 	local reg = AA.getRegistries()
 	local pc = reg.CoreServices.PlacementCore.module
 	local Util = require(ReplicatedStorage.src.Util)
@@ -842,7 +835,6 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 	return nil, nil
 end
 
--- UNIT CLASSIFICATION & STATS (STRICT NON-DPS DETECTION FOR SPEEDWAGON / BULMA / SUPPORTS)
 local function isFarmUnit(AA, unitId, uinfo)
 	if not uinfo then
 		return false
@@ -1004,7 +996,6 @@ local function isMainEquippedUnit(AA, uuid, unitId)
 	if cpd and cpd.owned_units and cpd.owned_units[uuid] then
 		return true
 	end
-	-- Astral Summon creates a new UUID inside col.temporary_units cloned from cpd.owned_units[eqUuid]
 	local tempUnit = col.temporary_units and col.temporary_units[uuid]
 	if tempUnit then
 		if tempUnit.traits then
@@ -1018,7 +1009,6 @@ local function isMainEquippedUnit(AA, uuid, unitId)
 			for _, eqUuid in pairs(cpd.equipped_units) do
 				local eqUnit = cpd.owned_units[eqUuid]
 				if eqUnit and eqUnit.unit_id == (unitId or tempUnit.unit_id) then
-					-- Random April Fools units have fixed Level 80 xp (2035815.98) and empty traits
 					if (tempUnit.xp and eqUnit.xp and math.abs(tempUnit.xp - eqUnit.xp) < 1 and math.abs(tempUnit.xp - 2035815.9800258144) > 10)
 						or (tempUnit.traits and #tempUnit.traits > 0) then
 						return true
@@ -1083,7 +1073,6 @@ local function canSummonMoreMainUnits(AA, placed)
 		if ou and ou.unit_id and Units[ou.unit_id] then
 			local ui = Units[ou.unit_id]
 			if (RARITY_SCORE[ui.rarity] or 0) >= 500 and not isFarmUnit(AA, ou.unit_id, ui) and not SUPPORT_UNITS[ou.unit_id] then
-				-- Check placed AND hotbar so we don't cast a redundant Summon while our Unique unit is already in the hotbar!
 				if (placed.byUuid[eqUuid] or 0) < 1 and (placed.mainById[ou.unit_id] or 0) < 1 and (hotbarMainById[ou.unit_id] or 0) < 1 then
 					return true
 				end
@@ -1143,7 +1132,6 @@ local function getPlayerPlacedUnits(AA, waypoints)
 				local wpIdx = (pos and waypoints and #waypoints > 0) and getClosestWaypointIndex(pos, waypoints) or 1
 				local unitProg = (waypoints and #waypoints > 0) and (wpIdx / #waypoints) or 0
 
-				-- Calculate exact unbuffed stat scaling (Level + Potency + Trait)
 				local baseAtUpg = (upg > 0 and uinfo.upgrade and uinfo.upgrade[upg] and tonumber(uinfo.upgrade[upg].damage)) or tonumber(uinfo.damage) or 100
 				local scaleMult = (baseAtUpg > 0 and unbuffedDmg > 0) and (unbuffedDmg / baseAtUpg) or 1
 				local isUniqueUnit = traitInfo.isUnique
@@ -1239,7 +1227,6 @@ local function getNextUpgradeCost(AA, entry)
 	return math.ceil(tonumber(nextTbl.cost) * mult)
 end
 
--- SESSION TRACKER
 local function loadSessionStats()
 	local data = {
 		sessionStart = os.time(),
@@ -1320,7 +1307,6 @@ local function recordRoundSummary(AA, state)
 	saveSessionStats(session)
 end
 
--- MAIN AUTO-PLAY CONTROLLER
 local function attachToAnimeAdventures(AA)
 	AA.AutoAprilFools = AA.AutoAprilFools or {
 		running = false,
@@ -1378,7 +1364,6 @@ local function attachToAnimeAdventures(AA)
 			state.matchStartSnapshot = fresh
 		end
 
-		-- 1. Match Finished -> Record Summary Once & Return to Lobby / Auto Replay
 		if dataFolder:FindFirstChild("GameFinished") and dataFolder.GameFinished.Value then
 			if not state.summaryRecordedForMatch then
 				state.summaryRecordedForMatch = true
@@ -1435,7 +1420,6 @@ local function attachToAnimeAdventures(AA)
 			state.lobbyTeleportTries = 0
 		end
 
-		-- 2. Difficulty & Auto Vote Start
 		local diffFolder = dataFolder:FindFirstChild("Difficulty")
 		if diffFolder and diffFolder:FindFirstChild("DifficultyDecided") and not diffFolder.DifficultyDecided.Value then
 			pcall(function()
@@ -1454,7 +1438,6 @@ local function attachToAnimeAdventures(AA)
 			end
 		end
 
-		-- 3. Auto Wave Skip Setting & Vote
 		if lp:FindFirstChild("_settings") and lp._settings:FindFirstChild("autoskip_waves") and not lp._settings.autoskip_waves.Value then
 			AA.invokeServer("toggle_setting", "autoskip_waves")
 		end
@@ -1462,7 +1445,6 @@ local function attachToAnimeAdventures(AA)
 			AA.invokeServer("vote_wave_skip")
 		end
 
-		-- 4. Auto Roguelike Card Selection
 		local rlFolder = dataFolder:FindFirstChild("Roguelike")
 		if rlFolder and rlFolder:FindFirstChild("WaitingForRoguelikeChoice") and rlFolder.WaitingForRoguelikeChoice.Value then
 			local bestKey = "1"
@@ -1492,7 +1474,6 @@ local function attachToAnimeAdventures(AA)
 		local placed = getPlayerPlacedUnits(AA, waypoints)
 		local leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
 
-		-- 4b. Immediately sell any placed Blacklisted Unit (e.g., Arlem / armin)
 		local soldBlacklisted = false
 		for _, entry in ipairs(placed.all) do
 			if isBlacklistedUnit(AA, entry.id, entry.uinfo) and not entry.isMainUnit then
@@ -1507,7 +1488,6 @@ local function attachToAnimeAdventures(AA)
 			leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
 		end
 
-		-- 5. Sell Farm Units on Wave 29+ (final waves) for Boss DPS & Cap Space
 		if wave >= 29 and #placed.farms > 0 then
 			for _, f in ipairs(placed.farms) do
 				if not (f.uinfo and f.uinfo.unsellable) then
@@ -1519,7 +1499,6 @@ local function attachToAnimeAdventures(AA)
 			money = lp._stats.resource.Value
 		end
 
-		-- 6. Emergency Cap Release when at >= 14 units and an enemy is leaking with 0 units ahead (or Boss past 78%)
 		if wave >= 12 and #placed.all >= 14 and leakThreat and ((leakThreat.prog >= 0.55 and leakThreat.aheadDpsCount == 0) or (leakThreat.isBoss and leakThreat.prog >= 0.78 and leakThreat.aheadDpsCount < 2)) then
 			local lanesList = getAllLanesWaypoints()
 			local leakLaneWps = lanesList[leakThreat.laneIdx or 1] or waypoints
@@ -1549,7 +1528,6 @@ local function attachToAnimeAdventures(AA)
 			end
 		end
 
-		-- 7. Use Active Skills on Placed Units (Staggered 100% Buff Loop + Smart Time Stop + Exit-Edge Repositioning + Vegito Fusion via Vegeta)
 		local cfg = getConfig()
 		local activeMobs = {}
 		local totalWpsCount = math.max(1, #waypoints)
@@ -1590,7 +1568,6 @@ local function attachToAnimeAdventures(AA)
 			local activeId = usc.get_active_id and usc.get_active_id(u)
 			if activeId and activeId ~= "vegito_fusion" and activeId ~= "himeno:final" then
 				local stats = u:FindFirstChild("_stats")
-				-- Ensure built-in client _auto_active doesn't waste smart-timed actives on cooldown
 				local isRepositionActive = REPOSITION_ACTIVE_UNITS[entry.id] or activeId == "law_2:shambles" or activeId == "julius:final_clock" or activeId == "lelouch:geass" or activeId == "kira:bite_the_dust"
 				local isBuffActive = BUFF_ACTIVE_UNITS[entry.id] or string.find(activeId, "buff") ~= nil or string.find(activeId, "erwin") ~= nil or string.find(activeId, "wendy") ~= nil or activeId == "pucci_heaven:final" or activeId == "kisuke:buff"
 				local isTimestopActive = TIMESTOP_UNITS[entry.id] or string.find(activeId, "time") ~= nil or string.find(activeId, "freeze") ~= nil or activeId == "shanks:haki" or activeId == "whitebeard:waves"
@@ -1622,7 +1599,6 @@ local function attachToAnimeAdventures(AA)
 						if not hasGokuReadyOnMap then
 							allowCast = false
 						else
-							-- Never let a no-trait temporary Vegeta steal the Goku fusion if we have a Unique/Main Vegeta equipped or a higher-potential Vegeta on the map!
 							local hasMainVegetaEquipped = hasEquippedUnitId(AA, entry.id)
 							if hasMainVegetaEquipped and not entry.isMainUnit and not entry.isUnique then
 								allowCast = false
@@ -1636,8 +1612,6 @@ local function attachToAnimeAdventures(AA)
 							end
 						end
 					elseif isRepositionActive then
-						-- Operator (ZONE) / Law Shambles, Julius Final Clock, Lelouch Geass, Kira Bite the Dust:
-						-- Only trigger right before enemies exit the unit's range (past unit path progress and near outer range edge)
 						allowCast = false
 						if entry.pos and entry.liveRange > 0 then
 							local entryProg = (entry.wpIdx or 1) / totalWpsCount
@@ -1645,7 +1619,6 @@ local function attachToAnimeAdventures(AA)
 							local hasExitingMob = false
 							local maxLeadRatio = 0
 							for _, mob in ipairs(activeMobs) do
-								-- Julius walk_back_time skips bosses; Law/Lelouch affect bosses too
 								if activeId ~= "julius:final_clock" or not mob.isBoss then
 									local dist2D = (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(mob.pos.X, 0, mob.pos.Z)).Magnitude
 									if dist2D <= entry.liveRange then
@@ -1683,11 +1656,9 @@ local function attachToAnimeAdventures(AA)
 							end
 						end
 					elseif isTimestopActive and cfg.SMART_TIMESTOP ~= false then
-						-- Global timestop/freeze has a 10s freeze immunity window (Buffs.freeze)
 						if not hasEnemyInDpsRange or (tick() - (state.lastTimestopCast or 0)) < 9.5 then
 							allowCast = false
 						elseif entry.pos and entry.liveRange > 0 and activeId ~= "dio_heaven:timestop" and activeId ~= "kc:time_erase" then
-							-- Range-based timestops (Homura, Jotaro, Shanks, Whitebeard) require at least 1 enemy inside THIS unit's range
 							local anyInUnitRange = false
 							for _, mob in ipairs(activeMobs) do
 								local dist2D = (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(mob.pos.X, 0, mob.pos.Z)).Magnitude
@@ -1751,10 +1722,8 @@ local function attachToAnimeAdventures(AA)
 			end
 		end
 
-		-- 8. Manage Hotbar Slots (1..6): Spells & Temporary Units
 		local spawnMult = usc.calculate_spawn_cost_multiplier(ucsc.session)
 
-		-- Strictly pick ONLY real high-damage attacking units (NEVER Speedwagon/Bulma/Erwin/non-attacking) for spells
 		local airTargetGoal = (wave <= 8 and (wave * 3500)) or (wave <= 14 and (wave * 8000)) or (wave * 16500)
 		local needMoreAirDps = (placed.totalAirDamage < airTargetGoal) or (wave >= 14 and placed.totalAirDamage < placed.totalDamage * 0.35)
 		local bestDpsTarget = nil
@@ -1770,7 +1739,6 @@ local function attachToAnimeAdventures(AA)
 					+ d.rarityScore * 15
 					+ d.upgrade * 500
 					+ ((needMoreAirDps and d.canAir) and 450000 or 0)
-				-- If there's an active boss/leak, strongly prefer buffing/cloning a unit that can actually reach it!
 				if leakThreat and d.pos then
 					local dist = (Vector3.new(d.pos.X, 0, d.pos.Z) - Vector3.new(leakThreat.pos.X, 0, leakThreat.pos.Z)).Magnitude
 					if dist <= (d.liveRange + 5) then
@@ -1883,7 +1851,6 @@ local function attachToAnimeAdventures(AA)
 						state.stats.lastAction = "use_spell_summon"
 						money = lp._stats.resource.Value
 					elseif #placed.dps == 0 and not hasAnyAttackingInHotbar and money < scost then
-						-- Prevent Wave 1-4 hotbar deadlock when 0 DPS units are placed and no attacking unit is in hotbar
 						AA.invokeServer("delete_ingame_spell", slot)
 						state.stats.spellsDeleted += 1
 						state.stats.lastAction = "del_spell_deadlock_summon"
@@ -1954,16 +1921,13 @@ local function attachToAnimeAdventures(AA)
 						local targetWp = nil
 
 						if isNonUniqueCopyOfEquippedUnique then
-							-- Never place a random no-trait copy of a unit we have equipped as Unique (since Unique has a strict 1-unit map cap)!
 							shouldDelete = true
 						elseif isBlacklistedUnit(AA, unitId, uinfo) and not isMain and not isUniqueHotbar then
 							shouldDelete = true
 						elseif (isMain or isUniqueHotbar) and currentMainSameCount >= unitCap then
 							shouldDelete = true
 						elseif isPriorityKeep and not isFarm and not isSupport then
-							-- Main Equipped / Unique Unit, Vegito Fusion Partner (Goku SSJ3 Evolved), or Time Stop Unit (Shadowgirl / Homura): NEVER delete, ALWAYS spawn!
 							if (isMain or isUniqueHotbar) and currentSameCount >= unitCap and money >= spawnCost then
-								-- A random no-trait copy on the board is blocking our Unique/Main copy's unitCap -> sell the no-trait copy immediately!
 								for _, d in ipairs(placed.dps) do
 									if d.id == unitId and not d.isMainUnit and not d.isUnique then
 										AA.invokeServer("sell_unit_ingame", d.model)
@@ -1983,7 +1947,6 @@ local function attachToAnimeAdventures(AA)
 									placementMode = "front"
 								end
 								if #placed.all >= 14 and money >= spawnCost then
-									-- Free a slot for our main carry / fusion partner / timestop unit using weighted valueScore!
 									if #placed.farms > 0 then
 										AA.invokeServer("sell_unit_ingame", placed.farms[1].model)
 										state.stats.unitsSold = (state.stats.unitsSold or 0) + 1
@@ -2129,7 +2092,6 @@ local function attachToAnimeAdventures(AA)
 									money = newMoney
 									leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
 								else
-									-- Server rejected this spot ("Cannot place unit here!") -> blacklist position immediately!
 									table.insert(state.failedPositions, hitPos)
 									state.unitFailCounts[uuid] = (state.unitFailCounts[uuid] or 0) + 1
 									state.stats.lastAction = "place_retry_" .. unitId .. "_" .. tostring(state.unitFailCounts[uuid])
@@ -2151,12 +2113,10 @@ local function attachToAnimeAdventures(AA)
 			end
 		end
 
-		-- 9. Smart Unit Upgrades (In-Range Boss/Leak Catchers -> Early Farms -> Main Unit / Primary Air & Ground Carries -> Secondary DPS)
 		placed = getPlayerPlacedUnits(AA, waypoints)
 		money = lp._stats.resource.Value
 		leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
 
-		-- Ensure Air-capable units (especially our highest-damage Air carries) use "flying" target priority so flying waves never slip past while ground mobs distract them!
 		if placed.airTargetCount >= 1 then
 			for _, d in ipairs(placed.dps) do
 				if d.canAir and d.model:FindFirstChild("_stats") and d.model._stats:FindFirstChild("priority") then
@@ -2175,7 +2135,6 @@ local function attachToAnimeAdventures(AA)
 		local summonReserveReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and wave >= 10 and #placed.dps >= 3 and placed.totalAirDamage >= math.max(35000, wave * 3800)
 		local spellSaveDefenseReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and #placed.dps >= 2 and placed.totalDamage >= math.max(6000, wave * 2400)
 
-		-- Calculate Yen to reserve for Astral Gate (2500), Astral Summon (10000), Random Buff (1000), Clone (5000), or Main Equipped Unit spawns
 		local reservedMoney = 0
 		local needMoreMainsNow = canSummonMoreMainUnits(AA, placed)
 		if (not leakThreat or leakThreat.aheadDpsCount > 0) and #placed.dps >= 1 then
@@ -2304,7 +2263,6 @@ local function attachToAnimeAdventures(AA)
 			if nextCost then
 				local priority = 0
 
-				-- Never waste Yen upgrading a no-trait duplicate of our Unique/Main carry!
 				local refMain = primaryMainCarry or bestMainCarryAnyUpg
 				local isInferiorDuplicateOfMain = refMain
 					and entry.id == refMain.id
@@ -2341,22 +2299,16 @@ local function attachToAnimeAdventures(AA)
 				elseif isInferiorDuplicateOfMain then
 					priority = 0
 				elseif FUSION_PARTNER_UNITS[entry.id] and entry.upgrade < 7 and bestMainCarryAnyUpg and bestMainCarryAnyUpg.upgrade >= 7 then
-					-- Once our Unique/Main Vegeta reaches Upgrade 7 (+ Fusion), immediately rush Goku SSJ3 to Upgrade 7 (+ Fusion) to trigger Vegito Fusion!
 					priority = 1265 - entry.upgrade * 4
 				elseif primaryMainCarry and entry.model == primaryMainCarry.model and ((entry.isUnique and entry.upgrade < 3 and nextCost <= 6000) or (entry.isUnique and placed.totalAirDamage >= math.max(35000, wave * 3800)) or (entry.isUnique and entry.canAir) or hasGokuForFusion) then
-					-- Immediately rush our Unique carry (or to Upgrade 7 for Vegito Fusion when Goku is on the map)!
 					priority = 1245 - entry.upgrade * 4
 				elseif entry.isFarm and wave <= 14 and not leakThreat and basicFarmDefenseReady and ((entry.id == "speedwagon" and nextCost <= 3000) or nextCost <= 2500) then
-					-- Max Speedwagon early and get Bulma's first cheap upgrades on Waves 1-14 so economy snowballs!
 					priority = 1215 - nextCost / 250
 				elseif needMoreAirNow and primaryAirCarry and entry.model == primaryAirCarry.model then
-					-- Ensure Air DPS scales smoothly on Waves 1-30 and is never starved by a Ground-only carry!
 					priority = 1190 - entry.upgrade * 4
 				elseif primaryMainCarry and entry.model == primaryMainCarry.model then
-					-- Once Air defense is satisfied, rush our #1 Main Carry (e.g. Unique Majin Vegeta) straight to Upgrade 7+!
 					priority = 1150
 				elseif entry.isIdol and earlyDefenseReady and not leakThreat then
-					-- Idol (Hoshino) increases ALL unit damage and reduces ALL upgrade/spawn costs per upgrade!
 					priority = 1130 - entry.upgrade * 15
 				elseif entry.isFarm and wave <= 18 and not isBossPrepWave then
 					if basicFarmDefenseReady and nextCost <= 4500 then
@@ -2369,28 +2321,21 @@ local function attachToAnimeAdventures(AA)
 						priority = 350 - nextCost / 200
 					end
 				elseif primaryAirCarry and entry.model == primaryAirCarry.model and (entry.rarityScore >= 500 or entry.upgrade < 3) then
-					-- Primary Air Carry hits BOTH Air and Ground enemies!
 					priority = 1098 - entry.upgrade * 4
 				elseif primaryGroundCarry and entry.model == primaryGroundCarry.model then
-					-- Scale our #1 Ground/Hybrid Carry (e.g. Escanor, Roger, Homura) alongside our Air Carry!
 					priority = 1090 - entry.upgrade * 4
 				elseif primaryAnchorCarry and entry.model == primaryAnchorCarry.model and entry.upgrade < 6 then
-					-- Ensure our #1 Back-Line Anchor Carry (at 52%-85% of the path) is upgraded to catch any boss/fast runner!
 					priority = 1084 - entry.upgrade * 4
 				elseif entry.rarityScore >= 500 and entry.upgrade < 2 and nextCost <= 2200 and #placed.dps <= 6 and not entry.isFarm and not entry.isSupport then
-					-- Grab cheap Upgrades 1-2 on early Mythics/Secrets without diluting late-game Yen across 10 units
 					priority = 1078 - entry.upgrade * 10
 				elseif entry.canAirPotential and not entry.canAir and entry.rarityScore >= 500 and not entry.isFarm and not entry.isSupport then
-					-- Rush Hybrid carries (e.g. Escanor to Upg 8) toward their Air-targeting unlock!
 					priority = 1075 - entry.upgrade * 4
 				elseif entry.canAir and entry.rarityScore >= 500 and entry.upgrade < 5 and not entry.isFarm and not entry.isSupport then
-					-- Upgrade secondary Air Mythics/Secrets to lvl 5+ so flying waves get melted!
 					priority = 1055 - entry.upgrade * 10
 				elseif (entry.isMainUnit or entry.isUnique) and not entry.isFarm and not entry.isSupport then
 					priority = 1035 - entry.upgrade * 4
 				elseif not entry.isFarm and not entry.isSupport then
 					if entry.canAir and entry.upgrade < 3 and nextCost <= 5500 then
-						-- Ensure every Air-targeting unit gets upgraded to lvl 3+ quickly
 						priority = 992 - entry.upgrade * 8
 					elseif entry.rarityScore >= 500 and entry.upgrade < 4 then
 						priority = 975 - entry.upgrade * 12

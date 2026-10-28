@@ -1,4 +1,3 @@
--- SERVICES & FLUENT LOADER
 
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
@@ -42,7 +41,6 @@ local InterfaceManager = loadRemoteModule(
     "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"
 )
 
--- KNIT, ENTITY & CONTROLLER INITIALIZATION
 
 local KnitClient = nil
 local EntityModule = nil
@@ -75,7 +73,6 @@ local function getController(name)
     return nil
 end
 
--- STATE & HUMANIZATION SETTINGS
 
 local State = {
     Running = true,
@@ -156,7 +153,6 @@ local function setStatus(msg)
     end
 end
 
--- SPATIAL, CAGE, GRID & GOAL HELPERS
 
 local function getCharacter()
     local char = LocalPlayer.Character
@@ -503,7 +499,6 @@ local function aimCameraForCrosshair(targetPos, alphaOverride)
     end
 end
 
--- NATIVE TOOL MANAGEMENT, COMBAT, BLOCK MINING & BRIDGING
 
 local function findTool(nameList)
     local char = LocalPlayer.Character
@@ -724,7 +719,6 @@ local function performLegitMeleeSwing(enemyInfo)
     return false
 end
 
--- CONTINUOUS FRAME MOVEMENT & HYPIXEL BRIDGE ROUTER
 
 local function computeBridgeNavigationTarget(hrpPos, myGoal, enemyGoal)
     if not enemyGoal then return nil end
@@ -839,7 +833,6 @@ local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
     end)
 end)
 
--- AUTO-QUEUE & STRATEGIC BRAIN
 
 local function isGuiChainVisible(guiObj)
     local curr = guiObj
@@ -1045,7 +1038,6 @@ local function startStrategicLoop()
     end)
 end
 
--- FLUENT UI WINDOW & TABS
 
 local Window = Fluent:CreateWindow({
     Title = "Cone Hub | Bridge Duels Legit Auto-Player",

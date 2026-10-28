@@ -1,4 +1,3 @@
--- HIGH LEVEL: Sentinel / Quick Match (Roblox Valorant) Legit Fluent UI Suite
 if getgenv().__CONE_SENTINEL_CLEANUP then
     pcall(getgenv().__CONE_SENTINEL_CLEANUP)
 end
@@ -14,7 +13,6 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 
--- HIGH LEVEL: Restore Any Previously Hooked Game Functions (100% Vanilla Anti-Cheat Safe)
 pcall(function()
     local orig = getgenv().__CONE_SENTINEL_ORIG_FUNCS
     if type(orig) == "table" then
@@ -37,7 +35,6 @@ pcall(function()
     end
 end)
 
--- HIGH LEVEL: Persistent Auto-Save Configuration
 local CONFIG_FOLDER = "ConeHub"
 local CONFIG_FILE = "ConeHub/SentinelValorant_Settings.json"
 
@@ -141,7 +138,6 @@ local OriginalLighting = {
     Ambient = Lighting.Ambient,
 }
 
--- HIGH LEVEL: Clean Up Stale Overlays & Old Fluent Windows
 pcall(function()
     for _, child in ipairs(CoreGui:GetChildren()) do
         if child.Name == "ConeSentinelOverlay" or child.Name == "ConeSentinelChamsFolder" then
@@ -165,7 +161,6 @@ pcall(function()
     end
 end)
 
--- HIGH LEVEL: Target Discovery (Real Match Enemies + Range Dummies + DM Bots)
 local function getGamemode()
     local gi = ReplicatedStorage:FindFirstChild("GameInfo")
     local gm = gi and gi:FindFirstChild("Gamemode")
@@ -269,7 +264,6 @@ local function collectCombatEntities()
     return list
 end
 
--- HIGH LEVEL: Visibility & Target Selection
 local VisRayParams = RaycastParams.new()
 VisRayParams.FilterType = Enum.RaycastFilterType.Exclude
 VisRayParams.IgnoreWater = true
@@ -337,7 +331,6 @@ local function findClosestAimTarget()
     return bestPart, bestEnt
 end
 
--- HIGH LEVEL: 2D & 3D ESP Overlay Construction
 local OverlayGui = Instance.new("ScreenGui")
 OverlayGui.Name = "ConeSentinelOverlay"
 OverlayGui.ResetOnSpawn = false
@@ -676,7 +669,6 @@ local function updateAllESP()
     end
 end
 
--- HIGH LEVEL: Legit Camera Aim Assist, RCS & Triggerbot Loop
 local function isAimActiveNow()
     if not State.AimAssist then return false end
     if State.AimMode == "Press B (Toggle)" or State.AimMode == "Always Active" then
@@ -805,7 +797,6 @@ local function stepCombatAndVisuals()
     end
 end
 
--- HIGH LEVEL: Fluent UI Window & Auto-Saving Controls
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
 local Window = Fluent:CreateWindow({
@@ -974,7 +965,6 @@ Tabs.Visuals:AddSlider("CustomFOVValue", {
 
 Window:SelectTab(1)
 
--- HIGH LEVEL: Keybind Handler (Press B to Toggle Aimbot) & Runtime Loops
 table.insert(Connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not State.Running then return end
     if gameProcessed or UserInputService:GetFocusedTextBox() then return end

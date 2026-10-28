@@ -1,4 +1,3 @@
--- HIGH LEVEL: Cone Hub Universal Game Loader
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local byPlace = {
