@@ -1,9 +1,11 @@
 -- SERVICES & FLUENT LOADER
 
 local CollectionService = game:GetService("CollectionService")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
@@ -40,13 +42,11 @@ local InterfaceManager = loadRemoteModule(
     "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"
 )
 
--- KNIT, ENTITY & BLINK INITIALIZATION
+-- KNIT, ENTITY & CONTROLLER INITIALIZATION
 
 local KnitClient = nil
 local EntityModule = nil
-local BlinkClient = nil
 local ServerDataModule = nil
-local ToolService = nil
 
 local function initGameModules()
     local modules = ReplicatedStorage:FindFirstChild("Modules")
@@ -63,15 +63,6 @@ local function initGameModules()
             local ok, mod = pcall(require, modules.ServerData)
             if ok then ServerDataModule = mod end
         end
-    end
-    local blinkFolder = ReplicatedStorage:FindFirstChild("Blink")
-    if not BlinkClient and blinkFolder and blinkFolder:FindFirstChild("Client") then
-        local ok, mod = pcall(require, blinkFolder.Client)
-        if ok then BlinkClient = mod end
-    end
-    if KnitClient and KnitClient.GetService and not ToolService then
-        local ok, svc = pcall(KnitClient.GetService, "ToolService")
-        if ok and svc then ToolService = svc end
     end
 end
 
@@ -92,24 +83,24 @@ local State = {
     QueueSubmode = "Solo",
     AutoBridge = false,
     AutoBreakBlocks = true,
-    AutoGappleHeal = true,
+    AutoGappleHeal = false,
     WTapEnabled = true,
     CircleStrafe = true,
-    AimSmoothness = 0.28,
+    AimSmoothness = 0.32,
     CombatReach = 8.6,
-    EngageDistance = 22.0,
-    HealThreshold = 52,
-    MinCPS = 9.0,
-    MaxCPS = 13.5,
+    EngageDistance = 20.0,
+    HealThreshold = 48,
+    MinCPS = 8.0,
+    MaxCPS = 12.0,
     StatusText = "Ready",
     SpawnAnchorPos = nil,
-    LastGoalTouchAt = 0,
     LastAttackAt = 0,
     LastQueueAt = 0,
     LastBreakAt = 0,
     StrafeDir = 1,
     LastStrafeSwitch = 0,
     IsEatingGapple = false,
+    IsMiningBlock = false,
     DesiredMoveTarget = nil,
     DesiredAimTarget = nil,
     WTapUntil = 0,
@@ -173,15 +164,33 @@ local function getCharacter()
     return char, hrp, hum
 end
 
+local function isUserPressingMoveKeys()
+    if UserInputService:GetFocusedTextBox() then
+        return true
+    end
+    return UserInputService:IsKeyDown(Enum.KeyCode.W)
+        or UserInputService:IsKeyDown(Enum.KeyCode.A)
+        or UserInputService:IsKeyDown(Enum.KeyCode.S)
+        or UserInputService:IsKeyDown(Enum.KeyCode.D)
+        or UserInputService:IsKeyDown(Enum.KeyCode.Up)
+        or UserInputService:IsKeyDown(Enum.KeyCode.Down)
+        or UserInputService:IsKeyDown(Enum.KeyCode.Left)
+        or UserInputService:IsKeyDown(Enum.KeyCode.Right)
+end
+
 local function disableAutoPlace()
     local bpc = getController("BlockPlacementController")
     if bpc then
-        if bpc.AutoPlaceEnabled and bpc.ToggleAutoPlace then
+        if bpc.ToggleAutoPlace then
             pcall(function()
                 bpc:ToggleAutoPlace(false)
             end)
         end
-        bpc.AutoPlaceEnabled = false
+        if bpc._trove and bpc._trove.Destroy then
+            pcall(function()
+                bpc._trove:Destroy()
+            end)
+        end
     end
 end
 
@@ -194,14 +203,38 @@ local function disableEdgeSneak()
     end
 end
 
+local function ensureSprinting()
+    initGameModules()
+    if EntityModule and EntityModule.LocalEntity and EntityModule.LocalEntity.SetSprinting then
+        if not EntityModule.LocalEntity.IsSprinting then
+            pcall(function()
+                EntityModule.LocalEntity:SetSprinting(true)
+            end)
+        end
+    end
+end
+
 local function isInSpawnCage()
     local char, hrp = getCharacter()
     if not char or not hrp then return false end
 
+    if hrp.Position.Y < 44 then
+        return false
+    end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { char }
+
+    local floorHit = Workspace:Raycast(hrp.Position, Vector3.new(0, -9, 0), params)
+    if not floorHit or not floorHit.Instance or not floorHit.Instance.CanCollide or floorHit.Instance.Transparency >= 0.95 then
+        return false
+    end
+
     local map = Workspace:FindFirstChild("Map")
     if map then
         for _, child in ipairs(map:GetChildren()) do
-            if child.Name:find("Cage") then
+            if child.Name:find("Cage") or child.Name:find("Spawn") then
                 local pos = nil
                 if child:IsA("BasePart") then
                     pos = child.Position
@@ -209,31 +242,13 @@ local function isInSpawnCage()
                     local p = child.PrimaryPart or child:FindFirstChildWhichIsA("BasePart", true)
                     if p then pos = p.Position end
                 end
-                if pos and (Vector3.new(hrp.Position.X - pos.X, 0, hrp.Position.Z - pos.Z)).Magnitude < 14 and math.abs(hrp.Position.Y - pos.Y) < 16 then
-                    return true
+                if pos and pos.Y >= 44 then
+                    local flatDist = Vector3.new(hrp.Position.X - pos.X, 0, hrp.Position.Z - pos.Z).Magnitude
+                    if flatDist < 12 and math.abs(hrp.Position.Y - pos.Y) < 12 then
+                        return true
+                    end
                 end
             end
-        end
-    end
-
-    if hrp.Position.Y > 30 then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { char }
-        local enclosedCount = 0
-        local dirs = {
-            Vector3.new(6, 0, 0),
-            Vector3.new(-6, 0, 0),
-            Vector3.new(0, 0, 6),
-            Vector3.new(0, 0, -6),
-        }
-        for _, d in ipairs(dirs) do
-            if Workspace:Raycast(hrp.Position, d, params) then
-                enclosedCount = enclosedCount + 1
-            end
-        end
-        if enclosedCount >= 3 then
-            return true
         end
     end
 
@@ -387,7 +402,7 @@ local function getNearestEnemy()
             if not sameTeam then
                 local erp = plr.Character:FindFirstChild("HumanoidRootPart")
                 local ehum = plr.Character:FindFirstChildOfClass("Humanoid")
-                if erp and ehum and ehum.Health > 0 and erp.Position.Y > -60 then
+                if erp and ehum and ehum.Health > 0 and erp.Position.Y > -40 and erp.Position.Y < 44 then
                     local d = (erp.Position - hrp.Position).Magnitude
                     if d < bestDist then
                         local ent = nil
@@ -415,7 +430,7 @@ local function getNearestEnemy()
                 if ent and ent.Character and ent.Character ~= char then
                     local erp = ent.Character:FindFirstChild("HumanoidRootPart")
                     local ehum = ent.Character:FindFirstChildOfClass("Humanoid")
-                    if erp and ehum and ehum.Health > 0 and erp.Position.Y > -60 then
+                    if erp and ehum and ehum.Health > 0 and erp.Position.Y > -40 and erp.Position.Y < 44 then
                         local d = (erp.Position - hrp.Position).Magnitude
                         if d < bestDist then
                             bestDist = d
@@ -435,7 +450,7 @@ local function getNearestEnemy()
     return bestTarget, bestDist
 end
 
-local function smoothAimAt(targetPos, alphaOverride)
+local function aimCameraForCrosshair(targetPos, alphaOverride)
     State.DesiredAimTarget = targetPos
     local _, hrp = getCharacter()
     local cam = Workspace.CurrentCamera
@@ -444,24 +459,41 @@ local function smoothAimAt(targetPos, alphaOverride)
     local alpha = alphaOverride or State.AimSmoothness
     local t = os.clock()
     local organicDrift = Vector3.new(
-        math.sin(t * 4.7) * 0.12,
-        math.cos(t * 3.9) * 0.08,
-        math.sin(t * 5.3) * 0.12
+        math.sin(t * 4.3) * 0.08,
+        math.cos(t * 3.7) * 0.05,
+        math.sin(t * 5.1) * 0.08
     )
     local aimPoint = targetPos + organicDrift
 
-    local flatAim = Vector3.new(aimPoint.X, hrp.Position.Y, aimPoint.Z)
-    if (flatAim - hrp.Position).Magnitude > 0.15 then
-        hrp.CFrame = hrp.CFrame:Lerp(CFrame.lookAt(hrp.Position, flatAim), math.clamp(alpha * 1.6, 0.22, 1.0))
+    local camPos = cam.CFrame.Position
+    local toTarget = aimPoint - camPos
+    if toTarget.Magnitude <= 0.2 then return end
+
+    local desiredLookCFrame = CFrame.lookAt(camPos, aimPoint)
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local mainGui = pgui and pgui:FindFirstChild("MainGui")
+    local crosshair = mainGui and mainGui:FindFirstChild("Crosshair")
+    if crosshair and crosshair:IsA("GuiObject") and cam.ViewportSize.X > 0 and cam.ViewportSize.Y > 0 then
+        local inset = GuiService:GetGuiInset()
+        local chCenter = crosshair.AbsolutePosition + crosshair.AbsoluteSize * 0.5 + inset
+        local unitRay = cam:ViewportPointToRay(chCenter.X, chCenter.Y)
+        local camSpaceDir = cam.CFrame:VectorToObjectSpace(unitRay.Direction.Unit)
+        if camSpaceDir.Z < -0.1 then
+            local pitchOffset = math.asin(math.clamp(-camSpaceDir.Y, -0.5, 0.5))
+            local yawOffset = math.atan2(-camSpaceDir.X, -camSpaceDir.Z)
+            desiredLookCFrame = desiredLookCFrame * CFrame.Angles(-pitchOffset, -yawOffset, 0)
+        end
     end
 
-    local camPos = cam.CFrame.Position
-    if (aimPoint - camPos).Magnitude > 0.15 then
-        cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(camPos, aimPoint), math.clamp(alpha, 0.12, 1.0))
+    cam.CFrame = cam.CFrame:Lerp(desiredLookCFrame, math.clamp(alpha, 0.15, 1.0))
+
+    local flatAim = Vector3.new(aimPoint.X, hrp.Position.Y, aimPoint.Z)
+    if (flatAim - hrp.Position).Magnitude > 0.25 then
+        hrp.CFrame = hrp.CFrame:Lerp(CFrame.lookAt(hrp.Position, flatAim), math.clamp(alpha * 1.4, 0.25, 0.85))
     end
 end
 
--- COMBAT, BRIDGING, BLOCK BREAKING & GAPPLE HEALING
+-- NATIVE TOOL MANAGEMENT, COMBAT, BLOCK MINING & BRIDGING
 
 local function findTool(nameList)
     local char = LocalPlayer.Character
@@ -484,10 +516,14 @@ end
 
 local function equipBestMelee()
     disableAutoPlace()
-    initGameModules()
+    if State.IsMiningBlock or State.IsEatingGapple then
+        return nil
+    end
     local char, _, hum = getCharacter()
+    if not char or not hum then return nil end
+
     local tool = findTool(MELEE_PRIORITY)
-    if tool and hum and char and tool.Parent ~= char then
+    if tool and tool.Parent ~= char then
         pcall(function() hum:EquipTool(tool) end)
     end
     return tool
@@ -506,25 +542,22 @@ local function tryEatGoldApple()
 
     State.IsEatingGapple = true
     disableAutoPlace()
-    initGameModules()
     if gapple.Parent ~= char then
         pcall(function() hum:EquipTool(gapple) end)
-        task.wait(0.08)
+        task.wait(0.1)
     end
 
-    if EntityModule and EntityModule.LocalEntity and EntityModule.LocalEntity.EatGoldApple then
+    local clientCommFolder = gapple:FindFirstChild("ClientComm") or gapple:FindFirstChildWhichIsA("Folder")
+    local eatRF = clientCommFolder and clientCommFolder:FindFirstChild("Eat", true)
+    if eatRF and eatRF:IsA("RemoteFunction") then
         pcall(function()
-            EntityModule.LocalEntity:EatGoldApple()
+            eatRF:InvokeServer()
         end)
     else
-        pcall(function() gapple:Activate() end)
-        if BlinkClient and BlinkClient.item_action and BlinkClient.item_action.start_eat_gold_apple then
-            pcall(function() BlinkClient.item_action.start_eat_gold_apple.fire() end)
-        end
-        task.wait(1.88)
-        if BlinkClient and BlinkClient.item_action and BlinkClient.item_action.stop_eat_gold_apple then
-            pcall(function() BlinkClient.item_action.stop_eat_gold_apple.fire(true) end)
-        end
+        pcall(function()
+            gapple:Activate()
+        end)
+        task.wait(1.6)
     end
 
     State.IsEatingGapple = false
@@ -539,13 +572,13 @@ local function placeBridgeBlockAhead(moveDir)
 
     local char, hrp, hum = getCharacter()
     if not char or not hrp or not hum then return false end
-    if hrp.Position.Y > 24 then return false end
+    if hrp.Position.Y > 25 or hrp.Position.Y < 16 then return false end
 
     local myGoal, enemyGoal = getGoals()
-    if myGoal and (Vector3.new(hrp.Position.X - myGoal.Position.X, 0, hrp.Position.Z - myGoal.Position.Z)).Magnitude < 16 then
+    if myGoal and (Vector3.new(hrp.Position.X - myGoal.Position.X, 0, hrp.Position.Z - myGoal.Position.Z)).Magnitude < 20 then
         return false
     end
-    if enemyGoal and (Vector3.new(hrp.Position.X - enemyGoal.Position.X, 0, hrp.Position.Z - enemyGoal.Position.Z)).Magnitude < 16 then
+    if enemyGoal and (Vector3.new(hrp.Position.X - enemyGoal.Position.X, 0, hrp.Position.Z - enemyGoal.Position.Z)).Magnitude < 20 then
         return false
     end
 
@@ -553,12 +586,12 @@ local function placeBridgeBlockAhead(moveDir)
     if flatDir.Magnitude < 0.1 then return false end
     flatDir = flatDir.Unit
 
-    local probePos = hrp.Position + flatDir * 3.4
+    local probePos = hrp.Position + flatDir * 3.5
     if hasGroundBelow(probePos, 35) then
         return false
     end
 
-    local gridPos = snapToBlockGrid(hrp.Position + flatDir * 3.0 - Vector3.new(0, 3.2, 0))
+    local gridPos = snapToBlockGrid(hrp.Position + flatDir * 3.0 - Vector3.new(0, 3.0, 0))
     local blockTool = findTool({ "Blocks", "Clay", "Block" })
     if not blockTool then return false end
 
@@ -577,8 +610,7 @@ local function placeBridgeBlockAhead(moveDir)
     return true
 end
 
-local function breakObstructingBlockAhead(moveDir)
-    if not State.AutoBreakBlocks then return false end
+local function handleObstaclesAndMining(moveDir)
     if isInSpawnCage() then return false end
 
     local char, hrp, hum = getCharacter()
@@ -592,55 +624,60 @@ local function breakObstructingBlockAhead(moveDir)
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = { char }
 
-    local hitLow = Workspace:Raycast(hrp.Position + Vector3.new(0, -1.0, 0), flatDir * 3.8, params)
-    local hitMid = Workspace:Raycast(hrp.Position + Vector3.new(0, 0.8, 0), flatDir * 3.8, params)
-    local hitHigh = Workspace:Raycast(hrp.Position + Vector3.new(0, 3.2, 0), flatDir * 3.8, params)
+    local hitKnee = Workspace:Raycast(hrp.Position + Vector3.new(0, -1.2, 0), flatDir * 3.6, params)
+    local hitChest = Workspace:Raycast(hrp.Position + Vector3.new(0, 0.8, 0), flatDir * 3.6, params)
+    local hitHead = Workspace:Raycast(hrp.Position + Vector3.new(0, 2.8, 0), flatDir * 3.6, params)
 
-    local hit = hitMid or hitLow
-    if not hit or not hit.Instance then return false end
+    local function isGoalPart(p)
+        return p and (p.Name == "Goal" or p.Name == "GoalPart" or CollectionService:HasTag(p, "Goal"))
+    end
 
-    local part = hit.Instance
-    if CollectionService:HasTag(part, "Goal") or part.Name:find("Goal") then
+    if hitKnee and isGoalPart(hitKnee.Instance) then return false end
+    if hitChest and isGoalPart(hitChest.Instance) then return false end
+
+    if hitKnee and not hitChest and not hitHead then
+        hum.Jump = true
         return false
     end
 
-    if not hitHigh then
+    if (hitChest or hitKnee) and not hitHead then
         hum.Jump = true
-        if part.Name ~= "Clay" and not part:GetAttribute("BlockHealth") and not (part.Parent and part.Parent.Name:find("Blocks")) then
-            return false
-        end
+    end
+
+    local upperObstruction = hitChest or hitHead
+    if not upperObstruction or not upperObstruction.Instance then
+        return false
+    end
+
+    local part = upperObstruction.Instance
+    local isPlayerBlock = (part.Name == "Block" or part.Name == "Clay" or part:GetAttribute("BlockHealth") ~= nil or (part.Parent and part.Parent.Name == "Blocks"))
+    if not isPlayerBlock or not State.AutoBreakBlocks then
+        return false
     end
 
     local now = os.clock()
-    if now - State.LastBreakAt < 0.32 then
-        return false
+    if now - State.LastBreakAt < 0.28 then
+        return true
     end
     State.LastBreakAt = now
 
-    local gridPos = snapToBlockGrid(part.Position)
     local pickTool = findTool(PICKAXE_PRIORITY)
-    if pickTool and pickTool.Parent ~= char then
+    if not pickTool then return false end
+
+    State.IsMiningBlock = true
+    if pickTool.Parent ~= char then
         pcall(function() hum:EquipTool(pickTool) end)
     end
 
-    initGameModules()
-    if BlinkClient and BlinkClient.item_action and BlinkClient.item_action.start_break_block then
-        local pickName = (pickTool and pickTool.Name) or "Pickaxe"
-        pcall(function()
-            BlinkClient.item_action.start_break_block.fire({
-                position = gridPos,
-                pickaxe_name = pickName,
-                timestamp = Workspace:GetServerTimeNow(),
-            })
-            task.delay(0.26, function()
-                pcall(function()
-                    BlinkClient.item_action.stop_break_block.fire(true)
-                end)
-            end)
-        end)
-        return true
-    end
-    return false
+    aimCameraForCrosshair(part.Position, 0.55)
+    pcall(function()
+        pickTool:Activate()
+    end)
+
+    task.delay(0.24, function()
+        State.IsMiningBlock = false
+    end)
+    return true
 end
 
 local function performLegitMeleeSwing(enemyInfo)
@@ -653,99 +690,23 @@ local function performLegitMeleeSwing(enemyInfo)
         return false
     end
 
+    aimCameraForCrosshair(enemyInfo.RootPart.Position + Vector3.new(0, 0.4, 0), math.max(State.AimSmoothness, 0.42))
+
     local now = os.clock()
     local dynamicCPS = State.MinCPS
-        + (State.MaxCPS - State.MinCPS) * (0.5 + 0.5 * math.sin(now * 2.3))
-        + (math.random() - 0.5) * 1.8
-    local minInterval = math.max(0.065, 1.0 / math.clamp(dynamicCPS, 6, 16))
+        + (State.MaxCPS - State.MinCPS) * (0.5 + 0.5 * math.sin(now * 2.1))
+        + (math.random() - 0.5) * 1.4
+    local minInterval = math.max(0.08, 1.0 / math.clamp(dynamicCPS, 6, 14))
     if now - State.LastAttackAt < minInterval then
         return false
     end
 
     State.LastAttackAt = now
-    initGameModules()
-
-    local flatEnemy = Vector3.new(enemyInfo.RootPart.Position.X, hrp.Position.Y, enemyInfo.RootPart.Position.Z)
-    if (flatEnemy - hrp.Position).Magnitude > 0.15 then
-        hrp.CFrame = hrp.CFrame:Lerp(CFrame.lookAt(hrp.Position, flatEnemy), 0.65)
-    end
-
     local tool = equipBestMelee()
-    local weaponName = (tool and tool.Name) or "WoodenSword"
-    local isCrit = hrp.AssemblyLinearVelocity.Y < -0.5
-
-    if tool then
-        pcall(function() tool:Activate() end)
-    end
-
-    local vmc = getController("ViewmodelController")
-    if vmc and vmc.PlayAnimation then
+    if tool and tool.Parent == char then
         pcall(function()
-            vmc:PlayAnimation(weaponName)
+            tool:Activate()
         end)
-    end
-
-    local ent = enemyInfo.Entity
-    if not ent and EntityModule and EntityModule.FindByCharacter then
-        local ok, found = pcall(EntityModule.FindByCharacter, enemyInfo.Character)
-        if ok then ent = found end
-    end
-    local targetId = (ent and ent.Id) or enemyInfo.Character:GetAttribute("EntityId")
-
-    if BlinkClient and BlinkClient.item_action and BlinkClient.item_action.attack_entity and targetId then
-        pcall(function()
-            BlinkClient.item_action.attack_entity.fire({
-                target_entity_id = targetId,
-                is_crit = isCrit,
-                weapon_name = weaponName,
-                extra = {
-                    those = (Workspace.Name == "Okay"),
-                    owo = "h-hi sevengwanddad~",
-                    rizz = "Bro.",
-                },
-            })
-        end)
-    end
-
-    if ToolService and ToolService.AttackPlayerWithSword then
-        pcall(function()
-            ToolService:AttackPlayerWithSword(enemyInfo.Character, isCrit, weaponName, "\226\128\139")
-        end)
-    end
-
-    return true
-end
-
-local function tryScoreInEnemyGoal(enemyGoal)
-    if not enemyGoal then return false end
-    local _, hrp, hum = getCharacter()
-    if not hrp or not hum then return false end
-
-    disableEdgeSneak()
-
-    local goalPos = enemyGoal.Position
-    local horizDist = Vector3.new(goalPos.X - hrp.Position.X, 0, goalPos.Z - hrp.Position.Z).Magnitude
-    local fullDist = (goalPos - hrp.Position).Magnitude
-
-    if horizDist > 5.0 and horizDist <= 14.5 then
-        hum.Jump = true
-    end
-
-    if fullDist <= 15.5 then
-        if os.clock() - State.LastGoalTouchAt > 0.35 then
-            State.LastGoalTouchAt = os.clock()
-            local remFolder = ReplicatedStorage:FindFirstChild("Remotes")
-            local goalTouch = remFolder and remFolder:FindFirstChild("GoalTouch")
-            if goalTouch and goalTouch:IsA("RemoteEvent") then
-                pcall(function()
-                    goalTouch:FireServer(enemyGoal, Workspace:GetServerTimeNow())
-                end)
-            end
-            if firetouchinterest then
-                pcall(firetouchinterest, hrp, enemyGoal, 0)
-                pcall(firetouchinterest, hrp, enemyGoal, 1)
-            end
-        end
         return true
     end
     return false
@@ -776,22 +737,32 @@ local function computeBridgeNavigationTarget(hrpPos, myGoal, enemyGoal)
     local horizToEnemyGoal = Vector3.new(enemyPos.X - hrpPos.X, 0, enemyPos.Z - hrpPos.Z).Magnitude
     local horizToMyGoal = Vector3.new(myPos.X - hrpPos.X, 0, myPos.Z - hrpPos.Z).Magnitude
 
-    if progress < 0.16 then
-        local entryPoint = Vector3.new(
-            myPos.X + bridgeDir.X * (bridgeLen * 0.24),
-            hrpPos.Y,
-            myPos.Z + bridgeDir.Z * (bridgeLen * 0.24)
+    if hrpPos.Y >= 32 and progress < 0.35 then
+        local dropOffAlong = math.max(along + 24, bridgeLen * 0.24)
+        return Vector3.new(
+            myPos.X + bridgeDir.X * dropOffAlong,
+            21,
+            myPos.Z + bridgeDir.Z * dropOffAlong
         )
-        if horizToMyGoal < 12.5 and progress < 0.04 then
+    end
+
+    if progress < 0.18 then
+        local entryAlong = bridgeLen * 0.24
+        local entryPoint = Vector3.new(
+            myPos.X + bridgeDir.X * entryAlong,
+            21,
+            myPos.Z + bridgeDir.Z * entryAlong
+        )
+        if hrpPos.Y < 19 and horizToMyGoal < 14 and progress < 0.06 then
             local sideSign = (lateral >= 0) and 1 or -1
-            entryPoint = entryPoint + rightDir * (sideSign * 7.5)
+            entryPoint = entryPoint + rightDir * (sideSign * 7.0)
         end
         return entryPoint
-    elseif progress < 0.82 and horizToEnemyGoal > 26 then
-        local targetAlong = math.min(bridgeLen * 0.86, along + 28)
+    elseif progress < 0.84 and horizToEnemyGoal > 24 then
+        local targetAlong = math.min(bridgeLen * 0.86, math.max(along + 26, bridgeLen * 0.28))
         return Vector3.new(
             myPos.X + bridgeDir.X * targetAlong,
-            enemyPos.Y + 2,
+            21,
             myPos.Z + bridgeDir.Z * targetAlong
         )
     else
@@ -804,52 +775,39 @@ local function stepRenderMovement()
     disableAutoPlace()
     disableEdgeSneak()
 
+    if isUserPressingMoveKeys() then
+        return
+    end
+
     local char, hrp, hum = getCharacter()
     if not char or not hrp or not hum or hum.Health <= 0 then return end
 
     local targetPos = State.DesiredMoveTarget
     if not targetPos then
-        hum:Move(Vector3.zero, false)
         return
     end
 
     local delta = targetPos - hrp.Position
     local flatDelta = Vector3.new(delta.X, 0, delta.Z)
-    if flatDelta.Magnitude <= 0.55 then
-        hum:Move(Vector3.zero, false)
+    if flatDelta.Magnitude <= 0.65 then
         return
     end
 
+    hum.AutoRotate = true
+    ensureSprinting()
+
     local moveDir = flatDelta.Unit
     if State.WTapUntil and os.clock() < State.WTapUntil then
-        moveDir = -moveDir * 0.35
-    end
-
-    local aimTarget = State.DesiredAimTarget or targetPos
-    local flatAim = Vector3.new(aimTarget.X, hrp.Position.Y, aimTarget.Z)
-    if (flatAim - hrp.Position).Magnitude > 0.2 then
-        hrp.CFrame = hrp.CFrame:Lerp(CFrame.lookAt(hrp.Position, flatAim), 0.35)
+        moveDir = -moveDir * 0.25
     end
 
     hum:Move(moveDir, false)
-    hum:MoveTo(targetPos)
-
-    if not isInSpawnCage() and flatDelta.Magnitude > 4.0 then
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { char }
-        local kneeHit = Workspace:Raycast(hrp.Position - Vector3.new(0, 1.2, 0), moveDir * 3.4, params)
-        local headHit = Workspace:Raycast(hrp.Position + Vector3.new(0, 2.6, 0), moveDir * 3.4, params)
-        if kneeHit and kneeHit.Instance and not CollectionService:HasTag(kneeHit.Instance, "Goal") and not headHit then
-            hum.Jump = true
-        end
-    end
 end
 
 pcall(function()
     RunService:UnbindFromRenderStep("BridgeDuelsLegitMove")
 end)
-RunService:BindToRenderStep("BridgeDuelsLegitMove", Enum.RenderPriority.Character.Value + 5, stepRenderMovement)
+RunService:BindToRenderStep("BridgeDuelsLegitMove", Enum.RenderPriority.Character.Value + 1, stepRenderMovement)
 
 local charAddedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
     task.spawn(function()
@@ -862,21 +820,40 @@ end)
 
 -- AUTO-QUEUE & STRATEGIC BRAIN
 
+local function isGuiChainVisible(guiObj)
+    local curr = guiObj
+    while curr and curr ~= LocalPlayer do
+        if curr:IsA("GuiObject") and not curr.Visible then
+            return false
+        end
+        if curr:IsA("LayerCollector") and not curr.Enabled then
+            return false
+        end
+        curr = curr.Parent
+    end
+    return guiObj ~= nil
+end
+
 local function isInLobbyOrMatchEnded()
     initGameModules()
-    if ServerDataModule and ServerDataModule.Submode == "Lobby" then
+    local _, enemyGoal = getGoals()
+    local hasActiveMatchMap = (enemyGoal ~= nil)
+
+    if ServerDataModule and ServerDataModule.Submode == "Lobby" and not hasActiveMatchMap then
         return true
     end
+
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if pgui then
         local hotbar = pgui:FindFirstChild("Hotbar")
         local mainFrame = hotbar and hotbar:FindFirstChild("MainFrame")
         local gameEnd = mainFrame and mainFrame:FindFirstChild("GameEndFrame")
-        if gameEnd and gameEnd.Visible then
+        if gameEnd and isGuiChainVisible(gameEnd) then
             return true
         end
     end
-    return false
+
+    return not hasActiveMatchMap and (ServerDataModule and ServerDataModule.Submode == "Lobby" or false)
 end
 
 local function tryEnterQueue()
@@ -915,7 +892,7 @@ local function stepStrategicBrain()
     local char, hrp, hum = getCharacter()
     if not char or not hrp or not hum or hum.Health <= 0 then
         State.DesiredMoveTarget = nil
-        setStatus("Waiting for spawn...")
+        setStatus("Waiting for character spawn...")
         return
     end
 
@@ -925,10 +902,11 @@ local function stepStrategicBrain()
         State.SpawnAnchorPos = hrp.Position
         equipBestMelee()
         if enemyGoal then
-            smoothAimAt(enemyGoal.Position + Vector3.new(0, 1.5, 0), 0.25)
+            local lookPos = Vector3.new(enemyGoal.Position.X, hrp.Position.Y, enemyGoal.Position.Z)
+            aimCameraForCrosshair(lookPos, 0.18)
             State.DesiredMoveTarget = enemyGoal.Position
         end
-        setStatus("In Spawn Cage — Ready for Round Start...")
+        setStatus("In Spawn Cage — Waiting for Round Start...")
         return
     end
 
@@ -957,7 +935,7 @@ local function stepStrategicBrain()
     if enemy and enemy.RootPart and myGoal then
         local enemyToMyGoal = (enemy.RootPart.Position - myGoal.Position).Magnitude
         local meToMyGoal = (hrp.Position - myGoal.Position).Magnitude
-        if enemyToMyGoal < 42 and enemyToMyGoal < meToMyGoal + 8 then
+        if enemyToMyGoal < 38 and enemyToMyGoal < meToMyGoal + 8 then
             enemyThreateningMyGoal = true
         end
     end
@@ -966,19 +944,17 @@ local function stepStrategicBrain()
         local enemyPos = enemy.RootPart.Position
         setStatus(string.format("Legit Duel | Opponent: %s (%.1f studs)", enemy.Character.Name, enemyDist))
 
-        smoothAimAt(enemyPos + Vector3.new(0, 0.8, 0), 0.35)
-
         local toEnemy = enemyPos - hrp.Position
         local flatToEnemy = Vector3.new(toEnemy.X, 0, toEnemy.Z)
         local flatUnit = flatToEnemy.Magnitude > 0.1 and flatToEnemy.Unit or hrp.CFrame.LookVector
 
-        if State.CircleStrafe and enemyDist <= 10.5 then
-            if os.clock() - State.LastStrafeSwitch > 1.05 then
+        if State.CircleStrafe and enemyDist <= 9.5 then
+            if os.clock() - State.LastStrafeSwitch > 1.1 then
                 State.LastStrafeSwitch = os.clock()
                 State.StrafeDir = -State.StrafeDir
             end
             local rightVec = flatUnit:Cross(Vector3.new(0, 1, 0)) * State.StrafeDir
-            local strafeTarget = hrp.Position + flatUnit * 3.8 + rightVec * 2.6
+            local strafeTarget = hrp.Position + flatUnit * 3.5 + rightVec * 2.4
             if not hasGroundBelow(strafeTarget, 10) then
                 State.StrafeDir = -State.StrafeDir
                 strafeTarget = enemyPos
@@ -988,9 +964,12 @@ local function stepStrategicBrain()
             State.DesiredMoveTarget = enemyPos
         end
 
-        local hitLanded = performLegitMeleeSwing(enemy)
-        if hitLanded and State.WTapEnabled then
-            State.WTapUntil = os.clock() + 0.055
+        handleObstaclesAndMining(flatUnit)
+        local swung = performLegitMeleeSwing(enemy)
+        if swung and State.WTapEnabled then
+            State.WTapUntil = os.clock() + 0.045
+        elseif not swung then
+            aimCameraForCrosshair(enemyPos + Vector3.new(0, 0.5, 0), State.AimSmoothness)
         end
         return
     end
@@ -999,30 +978,36 @@ local function stepStrategicBrain()
 
     if enemyGoal then
         local goalPos = enemyGoal.Position
-        local distToGoal = (goalPos - hrp.Position).Magnitude
+        local horizDistToGoal = Vector3.new(goalPos.X - hrp.Position.X, 0, goalPos.Z - hrp.Position.Z).Magnitude
         local navTarget = computeBridgeNavigationTarget(hrp.Position, myGoal, enemyGoal) or goalPos
         State.DesiredMoveTarget = navTarget
 
-        setStatus(string.format("Crossing Bridge -> Enemy Goal Hole (%.1f studs)", distToGoal))
+        setStatus(string.format("Rushing Bridge -> Enemy Goal (%.1f studs)", horizDistToGoal))
 
-        smoothAimAt(navTarget + Vector3.new(0, 1.2, 0), 0.24)
         local dirToNav = navTarget - hrp.Position
         local flatDir = Vector3.new(dirToNav.X, 0, dirToNav.Z)
         if flatDir.Magnitude > 0.1 then
             flatDir = flatDir.Unit
         end
 
+        if not State.IsMiningBlock then
+            aimCameraForCrosshair( Vector3.new(navTarget.X, hrp.Position.Y - 0.5, navTarget.Z), 0.22)
+        end
+
         placeBridgeBlockAhead(flatDir)
-        breakObstructingBlockAhead(flatDir)
-        tryScoreInEnemyGoal(enemyGoal)
+        handleObstaclesAndMining(flatDir)
+
+        if horizDistToGoal > 4.5 and horizDistToGoal <= 12.0 and hrp.Position.Y <= 24 then
+            hum.Jump = true
+        end
     elseif enemy and enemy.RootPart then
         local enemyPos = enemy.RootPart.Position
         State.DesiredMoveTarget = enemyPos
         setStatus("Advancing toward opponent (" .. enemy.Character.Name .. ")")
-        smoothAimAt(enemyPos)
+        aimCameraForCrosshair(enemyPos, 0.25)
         local flatDir = Vector3.new(enemyPos.X - hrp.Position.X, 0, enemyPos.Z - hrp.Position.Z)
         placeBridgeBlockAhead(flatDir)
-        breakObstructingBlockAhead(flatDir)
+        handleObstaclesAndMining(flatDir)
     end
 end
 
@@ -1052,7 +1037,7 @@ StatusParagraph = Tabs.Main:AddParagraph({
 
 local MasterToggle = Tabs.Main:AddToggle("MasterAutoPlay", {
     Title = "Enable Legit Strategic Auto-Play",
-    Description = "Runs full Hypixel Bridge strategy (Sprint Bridge, Sword Duel + W-Tap, Defense Mining, Gapple Heal, and Goal Hole Diving).",
+    Description = "Runs full Hypixel Bridge strategy (Sprint Bridge, Native Sword Duel + W-Tap, Defense Mining, and Physical Goal Diving).",
     Default = false,
 })
 
@@ -1068,10 +1053,6 @@ MasterToggle:OnChanged(function(val)
         end)
     else
         State.DesiredMoveTarget = nil
-        local _, _, hum = getCharacter()
-        if hum then
-            pcall(function() hum:Move(Vector3.zero, false) end)
-        end
         setStatus("Paused.")
     end
 end)
@@ -1113,7 +1094,7 @@ Tabs.Main:AddButton({
 
 local WTapToggle = Tabs.Combat:AddToggle("WTapToggle", {
     Title = "Legit W-Tap Sprint Reset",
-    Description = "Briefly resets forward movement after landing a melee hit for maximum knockback.",
+    Description = "Briefly resets forward movement after swinging for maximum sprint knockback.",
     Default = true,
 })
 
@@ -1133,10 +1114,10 @@ end)
 
 local AimSlider = Tabs.Combat:AddSlider("AimSmoothness", {
     Title = "Camera Aim Smoothness",
-    Description = "Lower = softer human-like camera tracking; Higher = snappier tracking.",
-    Default = 28,
-    Min = 8,
-    Max = 80,
+    Description = "Lower = softer human-like camera tracking; Higher = snappier crosshair alignment.",
+    Default = 32,
+    Min = 10,
+    Max = 85,
     Rounding = 0,
 })
 
@@ -1146,7 +1127,7 @@ end)
 
 local ReachSlider = Tabs.Combat:AddSlider("CombatReach", {
     Title = "Legit Swing Reach (Studs)",
-    Description = "Game max reach is 9.0 studs; 8.2–8.8 hits reliably while staying within server validation.",
+    Description = "Uses native SwordClient crosshair + box hit detection (max 9.0 studs).",
     Default = 8.6,
     Min = 6.5,
     Max = 9.0,
@@ -1159,10 +1140,10 @@ end)
 
 local MaxCPSSlider = Tabs.Combat:AddSlider("MaxCPSSlider", {
     Title = "Target Peak CPS (Dynamic Jitter Applied)",
-    Description = "Automatically varies CPS each second to bypass NetworkController consistency checks.",
-    Default = 13,
+    Description = "Varies native tool activation rate organically.",
+    Default = 12,
     Min = 7,
-    Max = 15,
+    Max = 14,
     Rounding = 0,
 })
 
@@ -1173,7 +1154,7 @@ end)
 
 local BridgeToggle = Tabs.Bridge:AddToggle("AutoBridgeToggle", {
     Title = "Auto Bridge Over True Void Gaps Only",
-    Description = "Optional: Only places Clay over deep void gaps (>35 studs) and keeps AutoPlace disabled so it never places blocks under you.",
+    Description = "Optional: Only places Clay over deep void gaps (>35 studs) and forcibly destroys BlockPlacementController's AutoPlace trove.",
     Default = false,
 })
 
@@ -1184,7 +1165,7 @@ end)
 
 local BreakToggle = Tabs.Bridge:AddToggle("AutoBreakBlocksToggle", {
     Title = "Auto Mine Obstructing Enemy Blocks",
-    Description = "Equips Pickaxe and breaks enemy block defenses blocking the bridge or goal hole.",
+    Description = "Jumps over 1-block steps and equips Pickaxe to mine tall player-placed block walls.",
     Default = true,
 })
 
@@ -1195,7 +1176,7 @@ end)
 local GappleToggle = Tabs.Bridge:AddToggle("AutoGappleHeal", {
     Title = "Auto Retreat & Eat GoldApple When Low HP",
     Description = "Backs up from the opponent and eats a Golden Apple when HP drops below threshold.",
-    Default = true,
+    Default = false,
 })
 
 GappleToggle:OnChanged(function(val)
@@ -1204,7 +1185,7 @@ end)
 
 local HealSlider = Tabs.Bridge:AddSlider("HealThreshold", {
     Title = "GoldApple Heal HP Threshold",
-    Default = 52,
+    Default = 48,
     Min = 25,
     Max = 80,
     Rounding = 0,
