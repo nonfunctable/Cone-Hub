@@ -1,3 +1,4 @@
+-- HIGH LEVEL: Cone Hub Universal Game Loader
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local byPlace = {
@@ -7,7 +8,13 @@ local byPlace = {
     [4623386862] = "Piggy.lua",
     [5661005779] = "Piggy.lua",
     [11630038968] = "BridgeDuels.lua",
+    [9818210203] = "SentinelValorant.lua",
     [9818227981] = "SentinelValorant.lua",
+    [9863724560] = "SentinelValorant.lua",
+    [9863725282] = "SentinelValorant.lua",
+    [9863725575] = "SentinelValorant.lua",
+    [9863739405] = "SentinelValorant.lua",
+    [13752789015] = "SentinelValorant.lua",
 }
 
 local byGame = {
@@ -24,7 +31,7 @@ if not target then
         target = "SandsBelow.lua"
     elseif ReplicatedStorage:FindFirstChild("Blink") and ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Entity") then
         target = "BridgeDuels.lua"
-    elseif ReplicatedStorage:FindFirstChild("WeaponEngine") and ReplicatedStorage:FindFirstChild("AgentEngine") then
+    elseif ReplicatedStorage:FindFirstChild("AgentEngine") and ReplicatedStorage:FindFirstChild("AbilityNet") then
         target = "SentinelValorant.lua"
     end
 end
