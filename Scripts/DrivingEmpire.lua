@@ -33,6 +33,10 @@ local delivery = require(ReplicatedStorage.Modules.Client.Jobs.Tasks.DeliveryJob
 local deliveryUtil = require(ReplicatedStorage.Modules.Shared.Jobs.Delivery.DeliveryUtil)
 local vehicles = require(ReplicatedStorage.Modules.Client.Vehicles.VehicleController)
 local vehicleUtil = require(ReplicatedStorage.Modules.Shared.Vehicles.VehicleUtil)
+local carTrailerUtil = require(ReplicatedStorage.Modules.Shared.Vehicles.CarTrailerUtil)
+local towablesUtil = require(ReplicatedStorage.Modules.Shared.Towables.TowablesUtil)
+local towablesData = require(ReplicatedStorage.Modules.Shared.DataManager.Data.TowablesData)
+local sharedData = require(ReplicatedStorage.Modules.Shared.Data)
 local tpGuard = require(ReplicatedStorage.Modules.Client.Exploit.VehicleTeleportDetectionController)
 restoreIdentity()
 
@@ -40,6 +44,51 @@ local function getPlayerCar()
     local ok, car = pcall(vehicleUtil.getPlayerData, plr)
     restoreIdentity()
     return ok and car or nil
+end
+
+local function getAttachedTrailer()
+    local ok, tr, towId = pcall(towablesUtil.GetPlayerAttachedTrailer, plr)
+    restoreIdentity()
+    if ok then
+        return tr, towId
+    end
+    return nil, nil
+end
+
+local function isPlayerTowing()
+    local ok, res = pcall(deliveryUtil.IsPlayerTowing, plr)
+    restoreIdentity()
+    return ok and res == true
+end
+
+local function findBestTowSetup()
+    local bestVeh, bestTow, bestCap = nil, nil, 0
+    pcall(function()
+        local stats = sharedData.GetLoadedStatsFolder(plr)
+        local vehFolder = stats and stats:FindFirstChild("Vehicles")
+        local towCfg = towablesUtil.GetEnabledTowables()
+        if not vehFolder or not towCfg then
+            return
+        end
+        for _, v in ipairs(vehFolder:GetChildren()) do
+            local vehId = v.Name
+            if towablesUtil.CanTowTrailer(vehId) then
+                for towId, info in pairs(towCfg) do
+                    local cap = tonumber(info.CargoCapacity) or 0
+                    if cap > 0 then
+                        local owned = (not towablesUtil.IsTowablePurchasable(towId)) or towablesData.IsTowableUnlocked(plr, towId)
+                        if owned and towablesUtil.CanVehicleTowTowable(vehId, towId, plr) then
+                            if cap > bestCap or (cap == bestCap and towId == "LargeBox") then
+                                bestVeh, bestTow, bestCap = vehId, towId, cap
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    restoreIdentity()
+    return bestVeh, bestTow, bestCap
 end
 
 local function loadRemoteModule(primaryUrl, fallbackUrl)
@@ -97,10 +146,14 @@ local State = {
     running = true,
     ready = false,
     autoDelivery = (saved.autoDelivery == true),
+    autoTrailer = (saved.autoTrailer ~= false),
     deliveryMode = (saved.deliveryMode == "Safe" or saved.deliveryMode == "HighRisk") and saved.deliveryMode or "HighRisk",
     dropDelay = math.clamp(tonumber(saved.dropDelay) or 4.5, 1, 10),
     antiAfk = (saved.antiAfk ~= false),
+    spawningTow = false,
+    lastTowAttempt = 0,
     hover = nil,
+    trailerHover = nil,
     curTarget = nil,
     curLoc = nil,
     curPhase = nil,
@@ -125,6 +178,7 @@ local function saveCurrentSettings()
             end
             writefile(settingsPath, HttpService:JSONEncode({
                 autoDelivery = State.autoDelivery,
+                autoTrailer = State.autoTrailer,
                 deliveryMode = State.deliveryMode,
                 dropDelay = State.dropDelay,
                 antiAfk = State.antiAfk,
@@ -148,14 +202,31 @@ local function clearHover()
         end)
         State.hover = nil
     end
+    if State.trailerHover then
+        pcall(function()
+            State.trailerHover:Destroy()
+        end)
+        State.trailerHover = nil
+    end
 end
 
-local function getLoc(pos, skipLast)
+local function getLoc(pos, skipLast, ignoreTrailerFilter)
+    local isTowing = not ignoreTrailerFilter and isPlayerTowing() or false
     local loc, dist
 
     for _, v in ipairs(CollectionService:GetTagged("DeliveryLocation")) do
         if v:IsA("BasePart") and v.Parent then
-            if not skipLast or not deliveryUtil.IsLastDeliveryLocation(plr, v) then
+            local allowed = true
+            if not ignoreTrailerFilter then
+                local okA, resA = pcall(deliveryUtil.IsLocationAllowedForTrailer, v, isTowing)
+                allowed = not okA or resA
+            end
+            local isLast = false
+            if skipLast then
+                local okL, resL = pcall(deliveryUtil.IsLastDeliveryLocation, plr, v)
+                isLast = okL and resL
+            end
+            if allowed and not isLast then
                 local d = (v.Position - pos).Magnitude
                 if not dist or d < dist then
                     loc, dist = v, d
@@ -163,11 +234,12 @@ local function getLoc(pos, skipLast)
             end
         end
     end
-
+    restoreIdentity()
     return loc
 end
 
 local function tp(cf)
+    restoreIdentity()
     local char = plr.Character
     if not char then
         return
@@ -175,6 +247,7 @@ local function tp(cf)
 
     local car = getPlayerCar()
     local chassis = vehicles.getActiveChassisController()
+    local tr = getAttachedTrailer()
     restoreIdentity()
 
     if car and car.Model and car.WeightPart then
@@ -183,6 +256,20 @@ local function tp(cf)
         end
 
         tpGuard.AuthorizeNextTeleport()
+
+        local vehHitch, trHitch, trAtt, vehAtt
+        pcall(function()
+            vehHitch = carTrailerUtil.GetHitchPart(car.Model, false)
+            trHitch = vehHitch and carTrailerUtil.GetAttachedTrailerHitch(vehHitch)
+            if trHitch and vehHitch then
+                trAtt, vehAtt = carTrailerUtil.GetMatchingHitchAttachments(trHitch, vehHitch)
+            end
+        end)
+        restoreIdentity()
+
+        local tWeight = tr and tr:FindFirstChild("Weight")
+        local weightToAtt = (tWeight and trAtt) and tWeight.CFrame:ToObjectSpace(trAtt.WorldCFrame) or nil
+
         car.Model.PrimaryPart = car.WeightPart
         car.Model:SetPrimaryPartCFrame(cf)
         car.WeightPart.Anchored = false
@@ -198,6 +285,28 @@ local function tp(cf)
             if v:IsA("BasePart") then
                 v.AssemblyLinearVelocity = Vector3.zero
                 v.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
+
+        if tr and tr.Parent and tWeight and tWeight:IsA("BasePart") then
+            if weightToAtt and vehAtt then
+                local targetAttCF = CFrame.new(vehAtt.WorldPosition) * cf.Rotation
+                tr.PrimaryPart = tWeight
+                tr:SetPrimaryPartCFrame(targetAttCF * weightToAtt:Inverse())
+            end
+            tWeight.Anchored = false
+
+            local th = Instance.new("BodyVelocity")
+            th.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            th.Velocity = Vector3.zero
+            th.Parent = tWeight
+            State.trailerHover = th
+
+            for _, v in ipairs(tr:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.AssemblyLinearVelocity = Vector3.zero
+                    v.AssemblyAngularVelocity = Vector3.zero
+                end
             end
         end
 
@@ -245,7 +354,7 @@ local Window = Fluent:CreateWindow({
     Title = "Cone Hub",
     SubTitle = "Driving Empire",
     TabWidth = 140,
-    Size = UDim2.fromOffset(520, 390),
+    Size = UDim2.fromOffset(520, 420),
     Acrylic = false,
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl,
@@ -295,6 +404,12 @@ local AutoDeliveryToggle = Tabs.Jobs:AddToggle("AutoDelivery", {
     Default = State.autoDelivery,
 })
 
+local AutoTrailerToggle = Tabs.Jobs:AddToggle("AutoTrailer", {
+    Title = "Auto Trailer (+4 Max Cargo)",
+    Description = "Spawns your best tow truck & free +4 semi trailer for up to +100% more cash per trip",
+    Default = State.autoTrailer,
+})
+
 local ModeDropdown = Tabs.Jobs:AddDropdown("DeliveryMode", {
     Title = "Delivery Mode",
     Description = "HighRisk (Hard) pays 33% more cash; Safe (Easy) prevents Outlaw steals",
@@ -313,6 +428,7 @@ local DelaySlider = Tabs.Jobs:AddSlider("DropDelay", {
 })
 
 local function updateInfo()
+    restoreIdentity()
     local ls = plr:FindFirstChild("leaderstats")
     local curCash = (ls and ls:FindFirstChild("Cash") and ls.Cash.Value) or State.startCash
     local curMiles = (ls and ls:FindFirstChild("Miles") and ls.Miles.Value) or 0
@@ -326,16 +442,25 @@ local function updateInfo()
     st = okSt and st or nil
     local carried = (st and st.ItemsCarried) or 0
     local cap = (st and st.MaxCapacity) or 0
+    if cap == 0 then
+        local okCap, maxC = pcall(deliveryUtil.GetMaxCarryCapacity, plr)
+        restoreIdentity()
+        cap = (okCap and maxC) or 0
+    end
     local car = getPlayerCar()
-    local carName = (car and car.Model and car.Model.Name) or "On Foot"
+    local _, towId = getAttachedTrailer()
+    local carLabel = (car and car.VehicleId) or "On Foot"
+    if towId then
+        carLabel = carLabel .. " + " .. tostring(towId)
+    end
 
     restoreIdentity()
     pcall(function()
         HomeProfileBox:SetDesc(string.format(
-            "Player: %s (@%s)  |  Vehicle: %s\nCash: $%s  |  Miles: %s  |  Bounty: $%s",
+            "Player: %s (@%s)  |  Setup: %s\nCash: $%s  |  Miles: %s  |  Bounty: $%s",
             plr.DisplayName,
             plr.Name,
-            carName,
+            carLabel,
             formatNumber(curCash),
             formatNumber(curMiles),
             formatNumber(curBounty)
@@ -351,17 +476,78 @@ local function updateInfo()
             formatDuration(elapsed)
         ))
         InfoBox:SetDesc(string.format(
-            "Status: %s  |  Job: %s (%s)\nPackages: %d/%d  |  Completed: %d\nCash: $%s (+$%s)",
+            "Status: %s  |  Job: %s (%s)\nPackages: %d/%d (%s)  |  Completed: %d\nCash: $%s (+$%s)",
             State.statusText,
             jobAttr,
             State.deliveryMode,
             carried,
             cap,
+            towId or "No Trailer",
             State.deliveriesDone,
             formatNumber(curCash),
             formatNumber(earned)
         ))
     end)
+end
+
+local function ensureTowSetup()
+    if not State.autoTrailer then
+        return
+    end
+    local car = getPlayerCar()
+    if car and isPlayerTowing() then
+        return
+    end
+    if tick() - State.lastTowAttempt < 4 then
+        return
+    end
+    local bestVeh, bestTow = findBestTowSetup()
+    if not bestVeh or not bestTow then
+        return
+    end
+
+    State.lastTowAttempt = tick()
+    State.spawningTow = true
+    State.statusText = string.format("Equipping %s + %s...", bestVeh, bestTow)
+    updateInfo()
+
+    clearHover()
+    local char = plr.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, c in ipairs(hrp:GetChildren()) do
+            if c:IsA("BodyVelocity") then
+                c:Destroy()
+            end
+        end
+    end
+
+    if not car or car.VehicleId ~= bestVeh then
+        local look = (hrp and Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z).Unit) or Vector3.new(0, 0, 1)
+        pcall(function()
+            ReplicatedStorage.Remotes.VehicleEvent:FireServer("Spawn", bestVeh, nil, nil, look)
+        end)
+        local t0 = tick()
+        repeat
+            task.wait(0.1)
+            car = getPlayerCar()
+        until not State.running or not State.autoDelivery or (car and car.VehicleId == bestVeh) or (tick() - t0 > 5)
+        task.wait(0.25)
+    end
+
+    if State.running and State.autoDelivery and not isPlayerTowing() then
+        pcall(function()
+            ReplicatedStorage.Remotes.SpawnTowable:InvokeServer(bestTow)
+        end)
+        local t1 = tick()
+        repeat
+            task.wait(0.1)
+        until not State.running or not State.autoDelivery or isPlayerTowing() or (tick() - t1 > 2.5)
+    end
+
+    State.spawningTow = false
+    State.curTarget, State.curLoc, State.curPhase = nil, nil, nil
+    restoreIdentity()
 end
 
 updateInfo()
@@ -376,6 +562,14 @@ AutoDeliveryToggle:OnChanged(function()
     else
         State.statusText = "Starting..."
     end
+    updateInfo()
+    saveCurrentSettings()
+end)
+
+AutoTrailerToggle:OnChanged(function()
+    State.autoTrailer = Options.AutoTrailer.Value
+    State.lastTowAttempt = 0
+    State.curTarget, State.curLoc, State.curPhase = nil, nil, nil
     updateInfo()
     saveCurrentSettings()
 end)
@@ -428,14 +622,16 @@ table.insert(State.conns, plr.Idled:Connect(function()
 end))
 
 if ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("DeliveryCompleted") then
-    table.insert(State.conns, ReplicatedStorage.Remotes.DeliveryCompleted.OnClientEvent:Connect(function()
-        State.deliveriesDone += 1
+    table.insert(State.conns, ReplicatedStorage.Remotes.DeliveryCompleted.OnClientEvent:Connect(function(data)
+        if type(data) ~= "table" or not data.FailureReason then
+            State.deliveriesDone += 1
+        end
         updateInfo()
     end))
 end
 
 table.insert(State.conns, RunService.Heartbeat:Connect(function()
-    if not State.autoDelivery then
+    if not State.autoDelivery or State.spawningTow then
         return
     end
     local char = plr.Character
@@ -469,7 +665,17 @@ task.spawn(function()
                 State.curTarget, State.curLoc, State.curPhase, State.lastTick, State.dropAt = nil, nil, nil, nil, nil
                 task.wait(0.5)
             else
-                local state = delivery.GetCurrentDeliveryState()
+                local okSt, state = pcall(delivery.GetCurrentDeliveryState)
+                restoreIdentity()
+                state = okSt and state or nil
+
+                if State.autoTrailer and (not state or (state.ItemsCarried or 0) == 0) then
+                    ensureTowSetup()
+                    okSt, state = pcall(delivery.GetCurrentDeliveryState)
+                    restoreIdentity()
+                    state = okSt and state or nil
+                end
+
                 local target, phase
 
                 if state then
@@ -502,7 +708,7 @@ task.spawn(function()
                     State.statusText = "Finding Pickup Location..."
 
                     if tick() - State.lastTick > 0.25 then
-                        local loc = getLoc(hrp.Position, true) or getLoc(hrp.Position)
+                        local loc = getLoc(hrp.Position, true, false) or getLoc(hrp.Position, false, false)
                         phase = "new"
                         target = loc and loc.Position
                     end
@@ -510,11 +716,12 @@ task.spawn(function()
 
                 if target then
                     if target ~= State.curTarget or phase ~= State.curPhase then
-                        tp(CFrame.new(target + Vector3.new(0, 3.5, 0)))
+                        local yOffset = getPlayerCar() and 5 or 3.5
+                        tp(CFrame.new(target + Vector3.new(0, yOffset, 0)))
                         State.curTarget, State.curPhase = target, phase
                     end
 
-                    local loc = getLoc(target)
+                    local loc = getLoc(target, false, (state ~= nil))
 
                     if loc then
                         if loc ~= State.curLoc then
