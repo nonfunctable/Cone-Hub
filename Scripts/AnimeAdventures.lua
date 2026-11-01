@@ -1,8 +1,12 @@
-local ALLOWED_APRIL_FOOLS_USERNAME = (getgenv and getgenv().AA_ALLOWED_USERNAME) or nil
+getgenv().AA_SUMMER_MODE_ACTIVE = true
+
+local ALLOWED_SUMMER_USERNAME = (getgenv and getgenv().AA_ALLOWED_USERNAME) or nil
 local ANIME_ADVENTURES_GAME_ID = 3183403065
 local LOBBY_PLACE_ID = 8304191830
+local MATCH_PLACE_ID = 14229839966
+local SUMMER_LEVEL_ID = "summer2_event"
 
-if game.GameId ~= 0 and game.GameId ~= ANIME_ADVENTURES_GAME_ID and game.PlaceId ~= LOBBY_PLACE_ID and game.PlaceId ~= 14229839966 then
+if game.GameId ~= 0 and game.GameId ~= ANIME_ADVENTURES_GAME_ID and game.PlaceId ~= LOBBY_PLACE_ID and game.PlaceId ~= MATCH_PLACE_ID and game.PlaceId ~= 14229762361 then
 	return
 end
 
@@ -13,15 +17,23 @@ local HttpService = game:GetService("HttpService")
 
 do
 	local lpCheck = Players.LocalPlayer or Players.PlayerAdded:Wait()
-	if not lpCheck or (ALLOWED_APRIL_FOOLS_USERNAME and lpCheck.Name ~= ALLOWED_APRIL_FOOLS_USERNAME) then
+	if not lpCheck or (ALLOWED_SUMMER_USERNAME and lpCheck.Name ~= ALLOWED_SUMMER_USERNAME) then
 		return
 	end
 end
 
-local SESSION_FILE = "aa_april_fools_session.json"
+local WEBHOOK_URL = (getgenv and getgenv().AA_WEBHOOK_URL) or ""
+local SESSION_FILE = "aa_summer_event_session.json"
 
 local AnimeAdventures = getgenv().AnimeAdventures or {}
 getgenv().AnimeAdventures = AnimeAdventures
+
+if AnimeAdventures.stopAutoAprilFools then
+	pcall(AnimeAdventures.stopAutoAprilFools)
+end
+if AnimeAdventures.stopAutoSummerEvent then
+	pcall(AnimeAdventures.stopAutoSummerEvent)
+end
 
 function AnimeAdventures.getRegistries()
 	local src = ReplicatedStorage:WaitForChild("src", 15)
@@ -95,14 +107,39 @@ function AnimeAdventures.invokeServer(endpointName, ...)
 	return remote:InvokeServer(...)
 end
 
-function AnimeAdventures.joinAndStartAprilFools(useMatchmaking)
-	if useMatchmaking then
-		return AnimeAdventures.invokeServer("request_matchmaking", "april2_event")
+function AnimeAdventures.joinAndStartSummerEvent(useMatchmaking, state)
+	local reg = AnimeAdventures.getRegistries()
+	local gui = reg and reg.ClientServices.GUIService and reg.ClientServices.GUIService.module
+
+	pcall(function()
+		if gui and gui.summer2_hunt_maps_ui then
+			gui.summer2_hunt_maps_ui:refresh()
+			if (gui.summer2_hunt_maps_ui.ready_count or 0) > 0 then
+				AnimeAdventures.invokeServer("claim_summer2_map_board_lines")
+			end
+		end
+	end)
+
+	if useMatchmaking ~= false then
+		local mmUI = gui and gui.matchmaking_ui
+		local mmEnabled = mmUI and mmUI.screenGUI and mmUI.screenGUI.Enabled
+		local now = tick()
+		if not mmEnabled or (now - (state and state.lastMatchmakeQueueTime or 0)) >= 45 then
+			if state then
+				state.lastMatchmakeQueueTime = now
+			end
+			local res = AnimeAdventures.invokeServer("request_matchmaking", SUMMER_LEVEL_ID)
+			pcall(function()
+				if mmUI and not mmUI.screenGUI.Enabled then
+					mmUI:show(SUMMER_LEVEL_ID)
+				end
+			end)
+			return res
+		end
+		return true
 	end
 
-	local reg = AnimeAdventures.getRegistries()
 	local lsc = reg and reg.ClientServices.LobbyServiceClient and reg.ClientServices.LobbyServiceClient.module
-	local gui = reg and reg.ClientServices.GUIService and reg.ClientServices.GUIService.module
 	local lob = workspace:FindFirstChild("_EVENT_CHALLENGES")
 		and workspace._EVENT_CHALLENGES:FindFirstChild("Lobbies")
 		and workspace._EVENT_CHALLENGES.Lobbies:FindFirstChild("_lobbytemplate_event3")
@@ -133,16 +170,18 @@ function AnimeAdventures.joinAndStartAprilFools(useMatchmaking)
 end
 
 local DEFAULT_CONFIG = {
-	USE_ASTRAL_SUMMON = true,
-	STAGGER_BUFF_ACTIVES = true,
+	USE_MATCHMAKING = true,
+	ALWAYS_PICK_DEBUFFS = true,
+	PERFECT_ERWIN_BUFF = true,
+	TARGET_ERWIN_COUNT = 3,
 	SMART_TIMESTOP = true,
 	RETURN_TO_LOBBY = true,
 }
 
 local function getConfig()
 	local g = (getgenv and getgenv()) or _G
-	if type(g.AA_CONFIG) == "table" then
-		return g.AA_CONFIG
+	if type(g.AA_SUMMER_CONFIG) == "table" then
+		return g.AA_SUMMER_CONFIG
 	end
 	return DEFAULT_CONFIG
 end
@@ -219,101 +258,103 @@ local REPOSITION_ACTIVE_UNITS = {
 	kira_evolved = true,
 }
 
-local TRAP_UNITS = {
-	usopp = true,
-	usopp_evolved = true,
-	usopp_ts = true,
-	usopp_ts_evolved = true,
-	deidara = true,
-	deidara_evolved = true,
-	kisuke = true,
-	kisuke_evolved = true,
-	elyssia = true,
-	elyssia_evolved = true,
-	teemo = true,
+local VEGO_UNITS = {
+	vegeta_majin_evolved = true,
+	vegeta_majin = true,
 }
 
-local BLACKLIST_UNITS = {
-	armin = true,
-	armin_evolved = true,
-	eren = true,
-	eren_final = true,
-	mahoraga = true,
-	guldo = true,
-}
-
-local FUSION_PARTNER_UNITS = {
+local CARROT_UNITS = {
 	goku_ssj3_evolved = true,
 	goku_ssj3 = true,
 }
 
 local BOSS_PREP_WAVES = {
-	[9] = true,
 	[10] = true,
-	[14] = true,
 	[15] = true,
-	[19] = true,
 	[20] = true,
-	[24] = true,
 	[25] = true,
-	[28] = true,
-	[29] = true,
 	[30] = true,
+	[35] = true,
+	[40] = true,
+	[45] = true,
+	[48] = true,
+	[49] = true,
+	[50] = true,
 }
 
-local function scoreRoguelikeText(text)
-	local t = string.lower(text or "")
-	if t == "confirm" or string.find(t, "^%d+$") then
-		return 0
+local function scoreSummerCardFrame(frame)
+	if not frame then
+		return -999999
 	end
 
+	local isDebuffCard = frame:FindFirstChild("UIGradientDebuff", true) ~= nil
+	local isBuffCard = frame:FindFirstChild("UIGradientBuff", true) ~= nil
 	local score = 0
-	if string.find(t, "new path") or string.find(t, "lane") then
-		score -= 250
+
+	if isDebuffCard then
+		score += 10000
+	elseif isBuffCard then
+		score -= 5000
 	end
-	if string.find(t, "shield") or string.find(t, "regen") then
-		score -= 70
-	end
-	if string.find(t, "speed") and string.find(t, "+") then
-		score -= 45
-	end
-	if string.find(t, "health") and string.find(t, "+") then
-		score -= 25
-	end
-	if string.find(t, "damage") then
-		if string.find(t, "+") then
-			score += 55
-		elseif string.find(t, "-") then
-			score -= 65
+
+	for _, desc in ipairs(frame:GetDescendants()) do
+		if desc:IsA("TextLabel") and desc.Visible then
+			local raw = desc.Text or ""
+			local t = string.lower(raw)
+			if t ~= "" and t ~= "confirm" and not string.find(t, "^%d+$") then
+
+				local col = desc.TextColor3
+				if col and col.R > 0.85 and col.G < 0.25 and col.B < 0.25 and not isBuffCard then
+					score += 2000
+				end
+
+				local pct = tonumber(string.match(t, "([%d%.]+)%%"))
+				if string.find(t, "summerpearl") or string.find(t, "pearl") or string.find(t, "reward currency") then
+					score += 5000 + ((pct or 10) * 60)
+				elseif string.find(t, "secret drop") then
+					score += 6500 + ((pct or 10) * 120)
+				elseif string.find(t, "curse") then
+					score += 4500
+				end
+
+				if string.find(t, "new path") or string.find(t, "new lane") then
+					score -= 750
+				elseif string.find(t, "explosive death") then
+					score -= 350
+				elseif string.find(t, "enemy regen") then
+					score -= 300 - ((pct or 1) * 40)
+				elseif string.find(t, "range") and string.find(t, "-") then
+					score -= 220
+				elseif string.find(t, "cooldown") and string.find(t, "+") then
+					score -= 180
+				elseif string.find(t, "damage") and string.find(t, "-") and not string.find(t, "boss") then
+					score -= 200
+				elseif string.find(t, "placement/upgrade cost") then
+
+					score += 180
+				elseif string.find(t, "enemy speed") or string.find(t, "burst enemy") then
+					score += 80
+				elseif string.find(t, "resist") or string.find(t, "enemy shield") or string.find(t, "enemy health") then
+					score += 60
+				end
+
+				if isBuffCard then
+					if string.find(t, "damage") and string.find(t, "+") then
+						score += 90
+					elseif string.find(t, "cooldown") and string.find(t, "-") then
+						score += 85
+					elseif string.find(t, "range") and string.find(t, "+") then
+						score += 65
+					elseif string.find(t, "cost") and string.find(t, "-") then
+						score += 70
+					elseif string.find(t, "¥") or string.find(t, "yen") then
+						score += 50
+					end
+				end
+			end
 		end
 	end
-	if string.find(t, "cooldown") then
-		if string.find(t, "-") then
-			score += 50
-		elseif string.find(t, "+") then
-			score -= 55
-		end
-	end
-	if string.find(t, "range") then
-		if string.find(t, "+") then
-			score += 35
-		elseif string.find(t, "-") then
-			score -= 45
-		end
-	end
-	if string.find(t, "cost") then
-		if string.find(t, "-") then
-			score += 40
-		elseif string.find(t, "+") then
-			score -= 50
-		end
-	end
-	if string.find(t, "¥") or string.find(t, "yen") then
-		score += 35
-	end
-	if string.find(t, "coin") or string.find(t, "april") or string.find(t, "reward") then
-		score += 45
-	end
+
 	return score
 end
 
@@ -326,7 +367,7 @@ local function extractLaneWaypoints(laneFolder)
 	if spawnPart and spawnPart:IsA("BasePart") then
 		table.insert(pts, spawnPart.Position)
 	end
-	for i = 1, 30 do
+	for i = 1, 40 do
 		local p = laneFolder:FindFirstChild(tostring(i))
 		if p and p:IsA("BasePart") then
 			table.insert(pts, p.Position)
@@ -386,21 +427,22 @@ local function buildDensePathSamples(lanesList)
 				local t = s / steps
 				local p = a:Lerp(b, t)
 				local prog = ((i - 1) + t) / math.max(1, totalWps - 1)
-				local weight = 0.4
-				if prog >= 0.04 and prog <= 0.25 then
-					weight = 4.8
-				elseif prog < 0.04 then
-					weight = 3.6
-				elseif prog <= 0.40 then
-					weight = 3.0
-				elseif prog <= 0.55 then
+
+				local weight = 0.25
+				if prog >= 0.03 and prog <= 0.22 then
+					weight = 6.0
+				elseif prog < 0.03 then
+					weight = 4.2
+				elseif prog <= 0.34 then
+					weight = 3.5
+				elseif prog <= 0.48 then
 					weight = 1.2
 				end
 				table.insert(lSamples, { pos = p, wpIdx = i, laneIdx = lIdx, prog = prog, weight = weight, isConvergence = false })
 			end
 		end
 		if #waypoints > 0 then
-			table.insert(lSamples, { pos = waypoints[#waypoints], wpIdx = #waypoints, laneIdx = lIdx, prog = 1.0, weight = 0.2, isConvergence = false })
+			table.insert(lSamples, { pos = waypoints[#waypoints], wpIdx = #waypoints, laneIdx = lIdx, prog = 1.0, weight = 0.15, isConvergence = false })
 		end
 		perLaneSamples[lIdx] = lSamples
 	end
@@ -423,17 +465,17 @@ local function buildDensePathSamples(lanesList)
 					end
 				end
 				local dOther = math.sqrt(minOtherDistSq)
-				if s.prog <= 0.38 then
+				if s.prog <= 0.34 then
 					s.isConvergence = true
 					if dOther <= 26 then
-						s.weight = s.weight * 2.2
+						s.weight = s.weight * 2.4
 					end
-				elseif s.prog <= 0.55 and dOther <= 20 then
+				elseif s.prog <= 0.50 and dOther <= 20 then
 					s.isConvergence = true
-					s.weight = 3.2
+					s.weight = 3.4
 				else
 					s.isConvergence = false
-					s.weight = 0.35
+					s.weight = 0.3
 				end
 				table.insert(allSamples, s)
 			end
@@ -620,12 +662,6 @@ local function scorePlacementCoverage(pos, denseSamples, effRange, mode, targetW
 				elseif s.wpIdx >= targetWpIdx - 1 then
 					score += 1.5
 				end
-			elseif mode == "anchor" then
-				if s.prog >= 0.45 and s.prog <= 0.88 then
-					score += s.weight * 1.5
-				else
-					score += 0.5
-				end
 			else
 				score += s.weight
 			end
@@ -653,7 +689,8 @@ local function isNearFailedPosition(pos, failedPositions, radius)
 	return false
 end
 
-local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPositions, leakPos, fusionPartnerPos, preferNearHill)
+local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPositions, leakPos, fusionPartnerPos, preferNearHill, bufferAnchorPos, firstErwinPos)
+
 	local reg = AA.getRegistries()
 	local pc = reg.CoreServices.PlacementCore.module
 	local Util = require(ReplicatedStorage.src.Util)
@@ -661,36 +698,23 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 	local waypoints = lanesList[1] or {}
 	local totalWps = math.max(1, #waypoints)
 	local denseSamples, numLanes = buildDensePathSamples(lanesList)
-	local effRange = math.clamp((tonumber(uinfo.range) or 22) * 1.3, 22, 42)
+	local effRange = math.clamp((tonumber(uinfo.range) or 22) * 1.3, 20, 42)
 	local candidates = {}
 
-	local hillPositions = {}
-	local hillFolder = workspace:FindFirstChild("_terrain") and workspace._terrain:FindFirstChild("hill")
-	if hillFolder then
-		for _, part in ipairs(hillFolder:GetDescendants()) do
-			if part:IsA("BasePart") then
-				table.insert(hillPositions, part.Position)
-			end
-		end
-	end
-
 	local startIdx = 1
-	local endIdx = math.max(2, math.ceil(totalWps * 0.38))
+	local endIdx = math.max(2, math.ceil(totalWps * 0.30))
 	if mode == "leak" and targetWpIdx then
 		startIdx = math.clamp(targetWpIdx, 2, math.max(2, totalWps - 1))
 		endIdx = math.clamp(targetWpIdx + 4, startIdx, totalWps)
-	elseif mode == "anchor" then
-		startIdx = math.max(2, math.floor(totalWps * 0.25))
-		endIdx = math.max(startIdx + 1, math.floor(totalWps * 0.52))
 	elseif mode == "farm" then
-		startIdx = math.max(2, math.floor(totalWps * 0.35))
-		endIdx = math.max(startIdx + 1, math.floor(totalWps * 0.80))
+		startIdx = math.max(2, math.floor(totalWps * 0.45))
+		endIdx = math.max(startIdx + 1, math.floor(totalWps * 0.85))
 	end
 
 	local function minFrontDistanceAllLanes(pt)
 		local best = math.huge
 		for _, lWps in ipairs(lanesList) do
-			local fEnd = math.max(2, math.ceil(#lWps * 0.35))
+			local fEnd = math.max(2, math.ceil(#lWps * 0.30))
 			local dl = minDistanceToPath(pt, lWps, 1, fEnd)
 			if dl < best then
 				best = dl
@@ -702,37 +726,63 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 		return best
 	end
 
-	if uinfo.hill_unit then
-		if hillFolder then
-			for _, part in ipairs(hillFolder:GetDescendants()) do
-				if part:IsA("BasePart") then
-					local sx = math.max(0, (part.Size.X / 2) - 1.3)
-					local sz = math.max(0, (part.Size.Z / 2) - 1.3)
-					for ox = -sx, sx, 2.3 do
-						for oz = -sz, sz, 2.3 do
-							local worldPt = (part.CFrame * CFrame.new(ox, 0, oz)).Position
-							local cov = scorePlacementCoverage(worldPt, denseSamples, effRange, mode, targetWpIdx, numLanes, leakPos)
-							local d = (mode == "leak") and minDistanceToPath(worldPt, waypoints, startIdx, endIdx) or minFrontDistanceAllLanes(worldPt)
-							local sortKey = (cov * 10) - (d * 2.4)
-							if fusionPartnerPos then
-								local distPartner = (Vector3.new(worldPt.X, 0, worldPt.Z) - Vector3.new(fusionPartnerPos.X, 0, fusionPartnerPos.Z)).Magnitude
-								if distPartner <= 25 then
-									sortKey += (3000 - distPartner * 60)
-								else
-									sortKey -= distPartner * 40
-								end
-							end
-							table.insert(candidates, { x = worldPt.X, y = part.Position.Y + 40, z = worldPt.Z, sortKey = sortKey })
+	local hillCandidates = {}
+	local bestFrontHillPos = nil
+	local bestFrontHillScore = -math.huge
+	local hillFolder = workspace:FindFirstChild("_terrain") and workspace._terrain:FindFirstChild("hill")
+	if hillFolder then
+		for _, part in ipairs(hillFolder:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local sx = math.max(0, (part.Size.X / 2) - 1.2)
+				local sz = math.max(0, (part.Size.Z / 2) - 1.2)
+				for ox = -sx, sx, 2.2 do
+					for oz = -sz, sz, 2.2 do
+						local worldPt = (part.CFrame * CFrame.new(ox, 0, oz)).Position
+						local cov = scorePlacementCoverage(worldPt, denseSamples, 26, "front", nil, numLanes, nil)
+						local dFront = minFrontDistanceAllLanes(worldPt)
+						local hScore = (cov * 12) - (dFront * 3.0)
+						table.insert(hillCandidates, { pos = worldPt, partY = part.Position.Y, cov = cov, dFront = dFront, hScore = hScore })
+						if hScore > bestFrontHillScore then
+							bestFrontHillScore = hScore
+							bestFrontHillPos = worldPt
 						end
 					end
 				end
 			end
 		end
+	end
+
+	if uinfo.hill_unit then
+		for _, hc in ipairs(hillCandidates) do
+			local worldPt = hc.pos
+			local cov = scorePlacementCoverage(worldPt, denseSamples, effRange, mode, targetWpIdx, numLanes, leakPos)
+			local d = (mode == "leak") and minDistanceToPath(worldPt, waypoints, startIdx, endIdx) or hc.dFront
+			local sortKey = (cov * 12) - (d * 2.8)
+			if fusionPartnerPos then
+				local distPartner = (Vector3.new(worldPt.X, 0, worldPt.Z) - Vector3.new(fusionPartnerPos.X, 0, fusionPartnerPos.Z)).Magnitude
+				if distPartner <= 22 then
+					sortKey += (5000 - distPartner * 80)
+				elseif distPartner <= 30 then
+					sortKey += (2000 - distPartner * 60)
+				else
+					sortKey -= distPartner * 50
+				end
+			end
+			table.insert(candidates, { x = worldPt.X, y = hc.partY + 40, z = worldPt.Z, sortKey = sortKey })
+		end
 	else
 		local anchorPts = {}
-		if fusionPartnerPos then
+		if mode == "buffer" and bufferAnchorPos then
+			table.insert(anchorPts, bufferAnchorPos)
+			if firstErwinPos then
+				table.insert(anchorPts, firstErwinPos)
+			end
+		elseif fusionPartnerPos then
 			table.insert(anchorPts, fusionPartnerPos)
+		elseif preferNearHill and bestFrontHillPos then
+			table.insert(anchorPts, bestFrontHillPos)
 		end
+
 		if mode == "leak" and leakPos then
 			table.insert(anchorPts, leakPos)
 			for _, lWps in ipairs(lanesList) do
@@ -741,9 +791,9 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 					table.insert(anchorPts, lWps[k])
 				end
 			end
-		elseif mode ~= "farm" then
+		elseif mode ~= "farm" and mode ~= "buffer" then
 			for _, lWps in ipairs(lanesList) do
-				local fEnd = math.max(2, math.ceil(#lWps * 0.38))
+				local fEnd = math.max(2, math.ceil(#lWps * 0.30))
 				for i = 1, math.min(#lWps, fEnd) do
 					table.insert(anchorPts, lWps[i])
 				end
@@ -751,7 +801,7 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 			if numLanes >= 2 then
 				for i = 1, #denseSamples, 3 do
 					local s = denseSamples[i]
-					if s.isConvergence and s.prog <= 0.48 then
+					if s.isConvergence and s.prog <= 0.42 then
 						table.insert(anchorPts, s.pos)
 					end
 				end
@@ -769,16 +819,20 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 		end
 
 		local seen = {}
+		local searchRadius = (mode == "buffer") and 15 or 22
+		local stepSize = (mode == "buffer") and 2.0 or 2.4
 		for _, wp in ipairs(anchorPts) do
-			for rx = -22, 22, 2.5 do
-				for rz = -22, 22, 2.5 do
-					local gx = math.floor((wp.X + rx) / 2.5 + 0.5) * 2.5
-					local gz = math.floor((wp.Z + rz) / 2.5 + 0.5) * 2.5
+			for rx = -searchRadius, searchRadius, stepSize do
+				for rz = -searchRadius, searchRadius, stepSize do
+					local gx = math.floor((wp.X + rx) / stepSize + 0.5) * stepSize
+					local gz = math.floor((wp.Z + rz) / stepSize + 0.5) * stepSize
 					local key = tostring(gx) .. ":" .. tostring(gz)
 					if not seen[key] then
 						seen[key] = true
 						local pt = Vector3.new(gx, wp.Y, gz)
 						local sortKey = 0
+						local allowSpot = true
+
 						if mode == "farm" then
 							local minD = math.huge
 							for _, lWps in ipairs(lanesList) do
@@ -788,34 +842,59 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 								end
 							end
 							local cov = scorePlacementCoverage(pt, denseSamples, 18, "front", nil, numLanes, nil)
-							sortKey = 80 - math.abs(minD - 15) * 4 - cov * 2
+							sortKey = 120 - math.abs(minD - 18) * 4 - cov * 3
+						elseif mode == "buffer" and bufferAnchorPos then
+
+							local distCarry = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(bufferAnchorPos.X, 0, bufferAnchorPos.Z)).Magnitude
+							if distCarry > 14.0 or distCarry < 2.8 then
+								allowSpot = false
+							else
+								local dPath = minFrontDistanceAllLanes(pt)
+
+								sortKey = 2000 - (distCarry * 35) - math.abs(dPath - 8.5) * 15
+								if firstErwinPos then
+									local distErwin = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(firstErwinPos.X, 0, firstErwinPos.Z)).Magnitude
+									if distErwin <= 13.5 then
+										sortKey += (1500 - distErwin * 40)
+									else
+										sortKey -= distErwin * 80
+									end
+								end
+							end
 						else
 							local cov = scorePlacementCoverage(pt, denseSamples, effRange, mode, targetWpIdx, numLanes, leakPos)
 							local d = (mode == "leak") and minDistanceToPath(pt, waypoints, startIdx, endIdx) or minFrontDistanceAllLanes(pt)
-							sortKey = (cov * 12) - (d * 2.5)
+							sortKey = (cov * 14) - (d * 3.0)
 							if fusionPartnerPos then
 								local distPartner = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(fusionPartnerPos.X, 0, fusionPartnerPos.Z)).Magnitude
-								if distPartner <= 24 then
-									sortKey += (3000 - distPartner * 60)
+								if distPartner <= 21 then
+									sortKey += (4500 - distPartner * 75)
+								elseif distPartner <= 28 then
+									sortKey += (1800 - distPartner * 50)
 								else
-									sortKey -= distPartner * 40
+									sortKey -= distPartner * 45
 								end
-							elseif preferNearHill and #hillPositions > 0 then
+							elseif preferNearHill and #hillCandidates > 0 then
 								local minHillDist = math.huge
-								for _, hp in ipairs(hillPositions) do
-									local hd = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(hp.X, 0, hp.Z)).Magnitude
+								local bestNearHillScore = 0
+								for _, hc in ipairs(hillCandidates) do
+									local hd = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(hc.pos.X, 0, hc.pos.Z)).Magnitude
 									if hd < minHillDist then
 										minHillDist = hd
+										bestNearHillScore = hc.hScore
 									end
 								end
-								if minHillDist <= 22 then
-									sortKey += (450 - minHillDist * 16)
+								if minHillDist <= 20 then
+									sortKey += (2500 - minHillDist * 55) + math.max(0, bestNearHillScore * 0.25)
 								else
-									sortKey -= (minHillDist - 22) * 12
+									sortKey -= (minHillDist - 20) * 40
 								end
 							end
 						end
-						table.insert(candidates, { x = gx, y = wp.Y + 50, z = gz, sortKey = sortKey })
+
+						if allowSpot then
+							table.insert(candidates, { x = gx, y = wp.Y + 50, z = gz, sortKey = sortKey })
+						end
 					end
 				end
 			end
@@ -828,14 +907,23 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 
 	for _, c in ipairs(candidates) do
 		local res = pc.raycast(Vector3.new(c.x, c.y, c.z), Vector3.new(0, -200, 0))
-		if res and pc.is_valid_raycast_hit(res.Instance, uinfo) and not isTooCloseToPlacedUnits(res.Position, 3.0) and not isNearFailedPosition(res.Position, failedPositions, 3.2) then
-			return Util.CFramePLV(res.Position, Vector3.new(0, 0, -1)), res.Position
+		if res and pc.is_valid_raycast_hit(res.Instance, uinfo) then
+
+			local isHillHit = hillFolder and res.Instance:IsDescendantOf(hillFolder)
+			if not (mode == "buffer" and isHillHit) then
+				if not isTooCloseToPlacedUnits(res.Position, 2.8) and not isNearFailedPosition(res.Position, failedPositions, 3.0) then
+					return Util.CFramePLV(res.Position, Vector3.new(0, 0, -1)), res.Position
+				end
+			end
 		end
 	end
 	return nil, nil
 end
 
 local function isFarmUnit(AA, unitId, uinfo)
+	if unitId == "speedwagon" or unitId == "bulma" or unitId == "bulma_evolved" then
+		return true
+	end
 	if not uinfo then
 		return false
 	end
@@ -857,7 +945,7 @@ local function isNonAttackingUnit(AA, unitId, uinfo)
 	if isFarmUnit(AA, unitId, uinfo) then
 		return true
 	end
-	if uinfo._NO_ATTACKS_UNIT or IDOL_UNITS[unitId] then
+	if uinfo._NO_ATTACKS_UNIT or IDOL_UNITS[unitId] or SUPPORT_UNITS[unitId] then
 		return true
 	end
 	if (tonumber(uinfo.damage) or 0) <= 0 then
@@ -866,54 +954,11 @@ local function isNonAttackingUnit(AA, unitId, uinfo)
 	return false
 end
 
-local function isBlacklistedUnit(AA, unitId, uinfo)
-	if BLACKLIST_UNITS[unitId] then
-		return true
-	end
-	if not uinfo then
-		return true
-	end
-	if not isFarmUnit(AA, unitId, uinfo) and not SUPPORT_UNITS[unitId] and not IDOL_UNITS[unitId] then
-		if uinfo.show_active_attack or uinfo.attack_cooldown == nil or (tonumber(uinfo.attack_cooldown) and tonumber(uinfo.attack_cooldown) >= 20) then
-			return true
-		end
-	end
-	return false
-end
-
-local function unitCanTargetAirStatic(AA, unitId, uinfo)
-	if not uinfo then
-		return false
-	end
-	if uinfo.hill_unit or uinfo.hybrid_placement or unitId == "vegito" then
-		return true
-	end
-	if uinfo._secondary_damage_types and uinfo._secondary_damage_types.air_damage then
-		return true
-	end
-	local Attacks = AA.loadData("Attacks")
-	if Attacks then
-		local baseAtk = uinfo.primary_attack_no_upgrades or uinfo.attack
-		if baseAtk and Attacks[baseAtk] and Attacks[baseAtk].targets_flying then
-			return true
-		end
-		if uinfo.upgrade then
-			for _, upgTbl in ipairs(uinfo.upgrade) do
-				local uAtk = upgTbl.primary_attack or upgTbl.attack
-				if uAtk and Attacks[uAtk] and Attacks[uAtk].targets_flying then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
 local function unitCanTargetAirNow(AA, u, unitId, uinfo)
 	if not uinfo then
 		return false
 	end
-	if uinfo.hill_unit or uinfo.hybrid_placement or unitId == "vegito" then
+	if uinfo.hill_unit or uinfo.hybrid_placement or unitId == "vegito" or CARROT_UNITS[unitId] then
 		return true
 	end
 	local reg = AA.getRegistries()
@@ -942,8 +987,6 @@ local function getUnitTraitInfo(AA, uuid)
 	local cpd = col.collection_profile_data
 	local ou = (cpd and cpd.owned_units and cpd.owned_units[uuid])
 		or (col.owned_units and col.owned_units[uuid])
-		or (col.temporary_units and col.temporary_units[uuid])
-		or (col.temporary_owned_units and col.temporary_owned_units[uuid])
 	if ou and ou.traits then
 		for _, t in pairs(ou.traits) do
 			local tid = t and t.trait
@@ -972,114 +1015,21 @@ local function getUnitTraitInfo(AA, uuid)
 	return info
 end
 
-local function isMainEquippedUnit(AA, uuid, unitId)
-	if unitId == "vegito" then
-		return true
+local function getGlobalUnitCountById(unitId)
+	local count = 0
+	local unitsFolder = workspace:FindFirstChild("_UNITS")
+	if not unitsFolder then
+		return 0
 	end
-	if not uuid then
-		return false
-	end
-	local reg = AA.getRegistries()
-	local ucsc = reg.ClientServices.UnitCollectionServiceClient and reg.ClientServices.UnitCollectionServiceClient.module
-	local col = ucsc and ucsc.session and ucsc.session.collection
-	if not col then
-		return false
-	end
-	local cpd = col.collection_profile_data
-	if cpd and cpd.equipped_units then
-		for _, eqUuid in pairs(cpd.equipped_units) do
-			if eqUuid == uuid then
-				return true
+	for _, u in ipairs(unitsFolder:GetChildren()) do
+		if CollectionService:HasTag(u, "nonminion_units") and not CollectionService:HasTag(u, "dying_units") then
+			local st = u:FindFirstChild("_stats")
+			if st and st:FindFirstChild("id") and st.id.Value == unitId then
+				count += 1
 			end
 		end
 	end
-	if cpd and cpd.owned_units and cpd.owned_units[uuid] then
-		return true
-	end
-	local tempUnit = col.temporary_units and col.temporary_units[uuid]
-	if tempUnit then
-		if tempUnit.traits then
-			for _, t in pairs(tempUnit.traits) do
-				if t and t.trait == "unique" then
-					return true
-				end
-			end
-		end
-		if cpd and cpd.equipped_units and cpd.owned_units then
-			for _, eqUuid in pairs(cpd.equipped_units) do
-				local eqUnit = cpd.owned_units[eqUuid]
-				if eqUnit and eqUnit.unit_id == (unitId or tempUnit.unit_id) then
-					if (tempUnit.xp and eqUnit.xp and math.abs(tempUnit.xp - eqUnit.xp) < 1 and math.abs(tempUnit.xp - 2035815.9800258144) > 10)
-						or (tempUnit.traits and #tempUnit.traits > 0) then
-						return true
-					end
-				end
-			end
-		end
-	end
-	return false
-end
-
-local function hasEquippedUnitId(AA, unitId)
-	local reg = AA.getRegistries()
-	local ucsc = reg.ClientServices.UnitCollectionServiceClient and reg.ClientServices.UnitCollectionServiceClient.module
-	local col = ucsc and ucsc.session and ucsc.session.collection
-	local cpd = col and col.collection_profile_data
-	if cpd and cpd.equipped_units and cpd.owned_units then
-		for _, eqUuid in pairs(cpd.equipped_units) do
-			local ou = cpd.owned_units[eqUuid]
-			if ou and ou.unit_id == unitId then
-				local isUniqueEq = false
-				if ou.traits then
-					for _, t in pairs(ou.traits) do
-						if t and t.trait == "unique" then
-							isUniqueEq = true
-							break
-						end
-					end
-				end
-				return true, eqUuid, isUniqueEq
-			end
-		end
-	end
-	return false, nil, false
-end
-
-local function canSummonMoreMainUnits(AA, placed)
-	local cfg = getConfig()
-	if cfg.USE_ASTRAL_SUMMON == false then
-		return false
-	end
-	if (placed.byId["vegito"] or 0) >= 1 then
-		return false
-	end
-	local reg = AA.getRegistries()
-	local ucsc = reg.ClientServices.UnitCollectionServiceClient and reg.ClientServices.UnitCollectionServiceClient.module
-	local col = ucsc and ucsc.session and ucsc.session.collection
-	local cpd = col and col.collection_profile_data
-	local Units = AA.loadData("Units")
-	if not cpd or not cpd.equipped_units or not cpd.owned_units then
-		return false
-	end
-	local hotbarMainById = {}
-	for i = 1, 6 do
-		local sUuid, sUdata = ucsc.get_unit_in_equipped_slot(tostring(i))
-		if sUuid and sUdata and isMainEquippedUnit(AA, sUuid, sUdata.unit_id) then
-			hotbarMainById[sUdata.unit_id] = (hotbarMainById[sUdata.unit_id] or 0) + 1
-		end
-	end
-	for _, eqUuid in pairs(cpd.equipped_units) do
-		local ou = cpd.owned_units[eqUuid]
-		if ou and ou.unit_id and Units[ou.unit_id] then
-			local ui = Units[ou.unit_id]
-			if (RARITY_SCORE[ui.rarity] or 0) >= 500 and not isFarmUnit(AA, ou.unit_id, ui) and not SUPPORT_UNITS[ou.unit_id] then
-				if (placed.byUuid[eqUuid] or 0) < 1 and (placed.mainById[ou.unit_id] or 0) < 1 and (hotbarMainById[ou.unit_id] or 0) < 1 then
-					return true
-				end
-			end
-		end
-	end
-	return false
+	return count
 end
 
 local function getPlayerPlacedUnits(AA, waypoints)
@@ -1092,78 +1042,55 @@ local function getPlayerPlacedUnits(AA, waypoints)
 		farms = {},
 		dps = {},
 		supports = {},
+		erwins = {},
 		byId = {},
 		byUuid = {},
-		mainById = {},
-		hillCount = 0,
-		airTargetCount = 0,
-		anchorCount = 0,
+		vegoEntry = nil,
+		carrotEntry = nil,
+		vegitoEntry = nil,
+		idolEntry = nil,
+		homuraEntry = nil,
 		totalDpsUpgrades = 0,
 		totalDamage = 0,
 		totalAirDamage = 0,
+		airTargetCount = 0,
 	}
 
 	for _, u in ipairs(usc.get_all_units_from_player(lp)) do
 		if u.Parent == workspace._UNITS and CollectionService:HasTag(u, "nonminion_units") and not CollectionService:HasTag(u, "dying_units") and u:FindFirstChild("_stats") then
 			local id = u._stats.id.Value
 			local uinfo = Units[id]
-			if uinfo and uinfo.rarity then
+			if uinfo then
 				local uUuid = u._stats:FindFirstChild("uuid") and u._stats.uuid.Value or nil
 				local upg = u._stats.upgrade and u._stats.upgrade.Value or 0
 				local liveDmg = u._stats:FindFirstChild("damage") and u._stats.damage.Value or 0
-				local unbuffedDmg = (u._stats:FindFirstChild("base_damage") and u._stats.base_damage.Value > 0 and u._stats.base_damage.Value) or liveDmg
 				local liveRange = u._stats:FindFirstChild("range") and u._stats.range.Value or 20
 				local liveSpa = (u._stats:FindFirstChild("attack_cooldown") and u._stats.attack_cooldown.Value) or tonumber(uinfo.attack_cooldown) or 5
 				local hrp = u:FindFirstChild("HumanoidRootPart") or u.PrimaryPart
 				local pos = hrp and hrp.Position
-				local isMain = isMainEquippedUnit(AA, uUuid, id)
 				local traitInfo = getUnitTraitInfo(AA, uUuid)
 				local isFarm = isFarmUnit(AA, id, uinfo)
 				local isIdol = IDOL_UNITS[id] == true
 				local isNonAtk = isNonAttackingUnit(AA, id, uinfo) or liveDmg <= 0
 				local isSupport = SUPPORT_UNITS[id] or isIdol or (uinfo and uinfo._show_as_buff_unit) or (isNonAtk and not isFarm)
-				local rarityScore = uinfo and RARITY_SCORE[uinfo.rarity] or 100
-				if (isMain or traitInfo.isUnique) and not isFarm and not isSupport then
-					rarityScore = math.max(rarityScore, 950)
-				end
+				local rarityScore = (uinfo and RARITY_SCORE[uinfo.rarity]) or 500
 				local canAir = unitCanTargetAirNow(AA, u, id, uinfo)
-				local canAirPotential = canAir or unitCanTargetAirStatic(AA, id, uinfo)
-				local maxUpg = uinfo and uinfo.upgrade and #uinfo.upgrade or 0
+				local maxUpg = (uinfo and uinfo.upgrade and #uinfo.upgrade) or 10
 				local wpIdx = (pos and waypoints and #waypoints > 0) and getClosestWaypointIndex(pos, waypoints) or 1
 				local unitProg = (waypoints and #waypoints > 0) and (wpIdx / #waypoints) or 0
-
-				local baseAtUpg = (upg > 0 and uinfo.upgrade and uinfo.upgrade[upg] and tonumber(uinfo.upgrade[upg].damage)) or tonumber(uinfo.damage) or 100
-				local scaleMult = (baseAtUpg > 0 and unbuffedDmg > 0) and (unbuffedDmg / baseAtUpg) or 1
-				local isUniqueUnit = traitInfo.isUnique
-				if isUniqueUnit then
-					isMain = true
-				end
-				local maxRawDmg = (maxUpg > 0 and uinfo.upgrade and uinfo.upgrade[maxUpg] and tonumber(uinfo.upgrade[maxUpg].damage)) or baseAtUpg
-				local maxSpa = (maxUpg > 0 and uinfo.upgrade and uinfo.upgrade[maxUpg] and tonumber(uinfo.upgrade[maxUpg].attack_cooldown)) or liveSpa
-				local currentDps = liveDmg * (6 / math.max(1.2, liveSpa))
-				local maxUnbuffedDmg = maxRawDmg * scaleMult
-				local maxPotentialDps = maxUnbuffedDmg * (6 / math.max(1.2, maxSpa))
-				local valueScore = currentDps + (maxPotentialDps * 0.65) + (isUniqueUnit and 3000000 or 0) + (isMain and 1000000 or 0) + (TIMESTOP_UNITS[id] and 250000 or 0) + (isIdol and 500000 or 0)
 
 				local entry = {
 					model = u,
 					id = id,
 					uuid = uUuid,
-					isMainUnit = isMain,
-					isUnique = isUniqueUnit,
+					isUnique = traitInfo.isUnique,
 					traitName = traitInfo.traitName,
-					traitMult = traitInfo.traitMult,
-					scaleMult = scaleMult,
+					traitMult = traitInfo.traitMult or 1.0,
 					upgrade = upg,
 					maxUpgrade = maxUpg,
 					liveDamage = liveDmg,
-					unbuffedDamage = unbuffedDmg,
-					maxUnbuffedDamage = maxUnbuffedDmg,
 					liveRange = liveRange,
 					liveSpa = liveSpa,
-					currentDps = currentDps,
-					maxPotentialDps = maxPotentialDps,
-					valueScore = valueScore,
 					pos = pos,
 					wpIdx = wpIdx,
 					prog = unitProg,
@@ -1171,25 +1098,33 @@ local function getPlayerPlacedUnits(AA, waypoints)
 					isFarm = isFarm,
 					isIdol = isIdol,
 					isSupport = isSupport,
-					isNonAttacking = isNonAtk,
 					rarityScore = rarityScore,
 					canAir = canAir,
-					canAirPotential = canAirPotential,
 				}
 				table.insert(result.all, entry)
 				result.byId[id] = (result.byId[id] or 0) + 1
 				if uUuid then
 					result.byUuid[uUuid] = (result.byUuid[uUuid] or 0) + 1
 				end
-				if isMain or isUniqueUnit then
-					result.mainById[id] = (result.mainById[id] or 0) + 1
+
+				if id == "vegito" then
+					result.vegitoEntry = entry
+				elseif VEGO_UNITS[id] then
+					if not result.vegoEntry or entry.upgrade > result.vegoEntry.upgrade then
+						result.vegoEntry = entry
+					end
+				elseif CARROT_UNITS[id] then
+					if not result.carrotEntry or entry.upgrade > result.carrotEntry.upgrade then
+						result.carrotEntry = entry
+					end
+				elseif isIdol then
+					result.idolEntry = entry
+				elseif TIMESTOP_UNITS[id] then
+					result.homuraEntry = entry
+				elseif id == "erwin" or id == "erwin_school" or id == "erwin_halloween" then
+					table.insert(result.erwins, entry)
 				end
-				if uinfo and (uinfo.hill_unit or uinfo.hybrid_placement) then
-					result.hillCount += 1
-				end
-				if canAir and not isFarm and not isSupport then
-					result.airTargetCount += 1
-				end
+
 				if isFarm then
 					table.insert(result.farms, entry)
 				elseif isSupport then
@@ -1200,9 +1135,7 @@ local function getPlayerPlacedUnits(AA, waypoints)
 					result.totalDamage += liveDmg
 					if canAir then
 						result.totalAirDamage += liveDmg
-					end
-					if unitProg >= 0.54 then
-						result.anchorCount += 1
+						result.airTargetCount += 1
 					end
 				end
 			end
@@ -1225,6 +1158,17 @@ local function getNextUpgradeCost(AA, entry)
 	local ucsc = reg.ClientServices.UnitCollectionServiceClient.module
 	local mult = usc.calculate_upgrade_cost_multiplier(entry.model, ucsc.session)
 	return math.ceil(tonumber(nextTbl.cost) * mult)
+end
+
+local function formatTimeMMSS(totalSec)
+	totalSec = math.max(0, math.floor(tonumber(totalSec) or 0))
+	local hrs = math.floor(totalSec / 3600)
+	local mins = math.floor((totalSec % 3600) / 60)
+	local secs = totalSec % 60
+	if hrs > 0 then
+		return string.format("%d:%02d:%02d", hrs, mins, secs)
+	end
+	return string.format("%d:%02d", mins, secs)
 end
 
 local function loadSessionStats()
@@ -1271,11 +1215,33 @@ local function getMatchMapName()
 	return mapName
 end
 
+local function getPlayerLevelAndXpText(lp)
+	local levelNum = "?"
+	local curXp = "0"
+	local reqXp = "0"
+	pcall(function()
+		local pg = lp:FindFirstChild("PlayerGui")
+		local su = pg and pg:FindFirstChild("spawn_units")
+		local lives = su and su:FindFirstChild("Lives")
+		local main = lives and lives:FindFirstChild("Main")
+		local desc = main and main:FindFirstChild("Desc")
+		local lvlLabel = desc and desc:FindFirstChild("Level")
+		if lvlLabel and lvlLabel:IsA("TextLabel") then
+			local txt = lvlLabel.Text or ""
+			local l, c, r = txt:match("Level%s+(%d+)%s*%[(%d+)%s*/%s*(%d+)%]")
+			if l and c and r then
+				levelNum, curXp, reqXp = l, c, r
+			end
+		end
+	end)
+	return levelNum, curXp, reqXp
+end
+
 local function captureMatchStartSnapshot(lp)
 	local stats = lp and lp:FindFirstChild("_stats")
 	return {
 		startTime = os.time(),
-		aprilCoins = stats and stats:FindFirstChild("_resourceAprilCoins") and stats._resourceAprilCoins.Value or 0,
+		summerPearls = stats and stats:FindFirstChild("_resourceSummerPearls") and stats._resourceSummerPearls.Value or 0,
 		gems = stats and stats:FindFirstChild("gem_amount") and stats.gem_amount.Value or 0,
 		gold = stats and stats:FindFirstChild("gold_amount") and stats.gold_amount.Value or 0,
 		xp = stats and stats:FindFirstChild("player_xp") and stats.player_xp.Value or 0,
@@ -1283,18 +1249,37 @@ local function captureMatchStartSnapshot(lp)
 	}
 end
 
-local function recordRoundSummary(AA, state)
+local function sendRoundSummaryWebhook(AA, state)
 	local lp = Players.LocalPlayer
 	if not lp then
 		return
 	end
 	task.wait(2.2)
+	local stats = lp:FindFirstChild("_stats")
 	local snap = state.matchStartSnapshot or captureMatchStartSnapshot(lp)
+	local durationSec = math.max(1, os.time() - (snap.startTime or os.time()))
+	local mapName = (snap.mapName and snap.mapName ~= "unknown") and snap.mapName or getMatchMapName()
 	local wave = workspace:FindFirstChild("_wave_num") and workspace._wave_num.Value or 0
-	local bases = workspace:FindFirstChild("_BASES")
-	local baseHum = bases and bases:FindFirstChildWhichIsA("Humanoid", true)
-	local won = (wave >= 30) and (baseHum ~= nil and baseHum.Health > 0)
+
+	local curPearls = stats and stats:FindFirstChild("_resourceSummerPearls") and stats._resourceSummerPearls.Value or 0
+	local curGems = stats and stats:FindFirstChild("gem_amount") and stats.gem_amount.Value or 0
+	local curGold = stats and stats:FindFirstChild("gold_amount") and stats.gold_amount.Value or 0
+	local curXpTotal = stats and stats:FindFirstChild("player_xp") and stats.player_xp.Value or 0
+
+	local diffPearls = math.max(0, curPearls - (snap.summerPearls or curPearls))
+	local diffGems = math.max(0, curGems - (snap.gems or curGems))
+	local diffGold = math.max(0, curGold - (snap.gold or curGold))
+	local diffXp = math.max(0, math.floor(curXpTotal - (snap.xp or curXpTotal)))
+
+	local won = (wave >= 50) or (diffPearls >= 300)
 	state.matchStartSnapshot = nil
+
+	local levelNum, curXpBar, reqXpBar = getPlayerLevelAndXpText(lp)
+	local displayName = lp.DisplayName or lp.Name
+	local nameValue = string.format("[%s] %s (%s/%s)", tostring(levelNum), tostring(displayName), tostring(curXpBar), tostring(reqXpBar))
+	if diffXp > 0 then
+		nameValue = nameValue .. string.format(" (+%d PlayerEXP)", diffXp)
+	end
 
 	local session = loadSessionStats()
 	session.sessionStart = math.min(tonumber(session.sessionStart) or os.time(), snap.startTime or os.time())
@@ -1305,33 +1290,95 @@ local function recordRoundSummary(AA, state)
 		session.losses = (session.losses or 0) + 1
 	end
 	saveSessionStats(session)
+
+	local rewardLines = {}
+	if diffPearls > 0 or curPearls > 0 then
+		table.insert(rewardLines, string.format("`+%d Summer Pearls` [%d]", diffPearls, curPearls))
+	end
+	if diffGems > 0 then
+		table.insert(rewardLines, string.format("`+%d Gems` [%d]", diffGems, curGems))
+	end
+	if diffGold > 0 then
+		table.insert(rewardLines, string.format("`+%d Gold` [%d]", diffGold, curGold))
+	end
+	if #rewardLines == 0 then
+		table.insert(rewardLines, string.format("`+0 Summer Pearls` [%d]", curPearls))
+	end
+
+	local statusStr = won and "Won" or string.format("Ended (Wave %d)", wave)
+	local resultValue = string.format(
+		"Summer Hunt (%s) - %s\n• Time: %s\n• Reward:\n%s",
+		tostring(mapName),
+		statusStr,
+		formatTimeMMSS(durationSec),
+		table.concat(rewardLines, "\n")
+	)
+
+	local sessionElapsed = math.max(durationSec, os.time() - (session.sessionStart or os.time()))
+	local sessionValue = string.format(
+		"Session Time: %s\nMatches Played: %d\nWin/Loss Ratio: %d:%d",
+		formatTimeMMSS(sessionElapsed),
+		session.matches,
+		session.wins,
+		session.losses
+	)
+
+	local payload = {
+		embeds = {
+			{
+				title = "Anime Adventures • Summer Hunt",
+				color = won and 3066993 or 15158332,
+				fields = {
+					{ name = "Name", value = nameValue, inline = false },
+					{ name = "Result", value = resultValue, inline = false },
+					{ name = "Session", value = sessionValue, inline = false },
+				},
+				footer = {
+					text = "Anime Adventures • " .. os.date("%H:%M:%S"),
+				},
+			},
+		},
+	}
+
+	local reqFn = (type(request) == "function" and request)
+		or (type(http_request) == "function" and http_request)
+		or (syn and type(syn.request) == "function" and syn.request)
+		or (http and type(http.request) == "function" and http.request)
+	if reqFn and type(WEBHOOK_URL) == "string" and #WEBHOOK_URL > 10 then
+		reqFn({
+			Url = WEBHOOK_URL,
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = HttpService:JSONEncode(payload),
+		})
+	end
 end
 
 local function attachToAnimeAdventures(AA)
-	AA.AutoAprilFools = AA.AutoAprilFools or {
+	AA.AutoSummerEvent = AA.AutoSummerEvent or {
 		running = false,
 		stats = {
 			ticks = 0,
 			unitsSpawned = 0,
 			unitsUpgraded = 0,
-			unitsDeleted = 0,
-			spellsUsed = 0,
-			spellsDeleted = 0,
 			roguelikePicked = 0,
 			activesUsed = 0,
+			erwinBuffsCast = 0,
+			vegitoFusions = 0,
 			replaysVoted = 0,
 			leaksHandled = 0,
 			lastAction = "idle",
 		},
 	}
 
-	function AA.stepAprilFools()
-		local state = AA.AutoAprilFools
+	function AA.stepSummerEvent()
+		local state = AA.AutoSummerEvent
 		state.stats.ticks += 1
+		local cfg = getConfig()
 
 		if game.PlaceId == LOBBY_PLACE_ID then
-			state.stats.lastAction = "lobby_join_april_fools"
-			AA.joinAndStartAprilFools(true)
+			state.stats.lastAction = "lobby_matchmaking_summer"
+			AA.joinAndStartSummerEvent(cfg.USE_MATCHMAKING ~= false, state)
 			return "lobby"
 		end
 
@@ -1344,7 +1391,6 @@ local function attachToAnimeAdventures(AA)
 		local ucsc = reg.ClientServices.UnitCollectionServiceClient and reg.ClientServices.UnitCollectionServiceClient.module
 		local usc = reg.CoreServices.UnitServiceCore and reg.CoreServices.UnitServiceCore.module
 		local Units = AA.loadData("Units")
-		local IngameSpells = AA.loadData("IngameSpells")
 		local lp = Players.LocalPlayer
 
 		if not gui or not ucsc or not usc or not lp or not lp:FindFirstChild("_stats") then
@@ -1358,42 +1404,35 @@ local function attachToAnimeAdventures(AA)
 
 		if not state.matchStartSnapshot then
 			state.matchStartSnapshot = captureMatchStartSnapshot(lp)
-		elseif (state.matchStartSnapshot.aprilCoins or 0) == 0 and lp._stats:FindFirstChild("_resourceAprilCoins") and lp._stats._resourceAprilCoins.Value > 0 then
+		elseif (state.matchStartSnapshot.summerPearls or 0) == 0 and lp._stats:FindFirstChild("_resourceSummerPearls") and lp._stats._resourceSummerPearls.Value > 0 then
 			local fresh = captureMatchStartSnapshot(lp)
 			fresh.startTime = state.matchStartSnapshot.startTime or fresh.startTime
 			state.matchStartSnapshot = fresh
 		end
 
 		if dataFolder:FindFirstChild("GameFinished") and dataFolder.GameFinished.Value then
-			if not state.summaryRecordedForMatch then
-				state.summaryRecordedForMatch = true
+			if not state.webhookSentForMatch then
+				state.webhookSentForMatch = true
 				pcall(function()
 					if type(writefile) == "function" then
 						local debugUnits = {}
-						local debugMobs = {}
 						if workspace:FindFirstChild("_UNITS") then
 							for _, u in ipairs(workspace._UNITS:GetChildren()) do
-								if u:FindFirstChild("_stats") and u._stats:FindFirstChild("player") then
-									if u._stats.player.Value == lp and u.Name ~= "aot_generic" then
-										table.insert(debugUnits, u.Name .. ":upg" .. tostring(u._stats.upgrade.Value) .. ":dmg" .. math.floor(u._stats.damage.Value))
-									elseif u._stats.player.Value == nil and u:FindFirstChild("Humanoid") and u.Humanoid.Health > 0 then
-										table.insert(debugMobs, u.Name .. ":" .. math.floor(u.Humanoid.Health) .. "/" .. math.floor(u.Humanoid.MaxHealth))
-									end
+								if u:FindFirstChild("_stats") and u._stats:FindFirstChild("player") and u._stats.player.Value == lp and u.Name ~= "aot_generic" then
+									table.insert(debugUnits, u.Name .. ":upg" .. tostring(u._stats.upgrade.Value) .. ":dmg" .. math.floor(u._stats.damage.Value))
 								end
 							end
 						end
-						writefile("aa_last_match_debug.json", HttpService:JSONEncode({
+						writefile("aa_last_summer_match_debug.json", HttpService:JSONEncode({
 							wave = workspace:FindFirstChild("_wave_num") and workspace._wave_num.Value or -1,
 							cash = math.floor(lp._stats.resource.Value),
 							units = debugUnits,
-							mobs = debugMobs,
 							stats = state.stats,
 						}))
 					end
 				end)
-				pcall(recordRoundSummary, AA, state)
+				pcall(sendRoundSummaryWebhook, AA, state)
 			end
-			local cfg = getConfig()
 			if cfg.RETURN_TO_LOBBY ~= false then
 				local rui = gui and gui.results_ui
 				if not (rui and rui._teleport_locked) and (tick() - (state.lastLobbyTeleportAttempt or 0)) >= 3.0 then
@@ -1416,21 +1455,22 @@ local function attachToAnimeAdventures(AA)
 			end
 			return "game_finished"
 		else
-			state.summaryRecordedForMatch = false
+			state.webhookSentForMatch = false
 			state.lobbyTeleportTries = 0
 		end
 
 		local diffFolder = dataFolder:FindFirstChild("Difficulty")
 		if diffFolder and diffFolder:FindFirstChild("DifficultyDecided") and not diffFolder.DifficultyDecided.Value then
 			pcall(function()
-				AA.invokeServer("select_difficulty", "Normal")
+				AA.invokeServer("select_difficulty", "Hard")
 			end)
 			return "waiting_difficulty"
 		end
 
 		local voteStart = dataFolder:FindFirstChild("VoteStart")
 		if voteStart and voteStart:FindFirstChild("VotingFinished") and not voteStart.VotingFinished.Value then
-			if not voteStart:FindFirstChild("StartTime") or voteStart.StartTime.Value > 0 then
+			if (not voteStart:FindFirstChild("StartTime") or voteStart.StartTime.Value > 0) and (tick() - (state.lastVoteStartTime or 0)) >= 2.0 then
+				state.lastVoteStartTime = tick()
 				pcall(function()
 					AA.invokeServer("vote_start")
 				end)
@@ -1447,25 +1487,29 @@ local function attachToAnimeAdventures(AA)
 
 		local rlFolder = dataFolder:FindFirstChild("Roguelike")
 		if rlFolder and rlFolder:FindFirstChild("WaitingForRoguelikeChoice") and rlFolder.WaitingForRoguelikeChoice.Value then
-			local bestKey = "1"
-			local bestScore = -math.huge
-			if gui.roguelike_select_ui and gui.roguelike_select_ui.option_frames then
-				for k, frame in pairs(gui.roguelike_select_ui.option_frames) do
-					local cardScore = 0
-					for _, desc in ipairs(frame:GetDescendants()) do
-						if desc:IsA("TextLabel") and desc.Visible then
-							cardScore += scoreRoguelikeText(desc.Text)
+			if (tick() - (state.lastRoguelikeVoteTime or 0)) >= 1.8 then
+				local bestKey = "1"
+				local bestScore = -math.huge
+				if gui.roguelike_select_ui and gui.roguelike_select_ui.option_frames then
+					for k, frame in pairs(gui.roguelike_select_ui.option_frames) do
+						local cardScore = scoreSummerCardFrame(frame)
+						if cardScore > bestScore then
+							bestScore = cardScore
+							bestKey = tostring(k)
 						end
 					end
-					if cardScore > bestScore then
-						bestScore = cardScore
-						bestKey = tostring(k)
-					end
 				end
+				state.lastRoguelikeVoteTime = tick()
+				pcall(function()
+					if gui.roguelike_select_ui and gui.roguelike_select_ui.select_option then
+						gui.roguelike_select_ui:select_option(bestKey)
+						gui.roguelike_select_ui.voted_option = bestKey
+					end
+				end)
+				AA.invokeServer("select_roguelike_option", bestKey)
+				state.stats.roguelikePicked += 1
+				state.stats.lastAction = "picked_debuff_card_" .. tostring(bestKey)
 			end
-			AA.invokeServer("select_roguelike_option", bestKey)
-			state.stats.roguelikePicked += 1
-			state.stats.lastAction = "roguelike_" .. tostring(bestKey)
 		end
 
 		local wave = workspace:FindFirstChild("_wave_num") and workspace._wave_num.Value or 0
@@ -1474,21 +1518,7 @@ local function attachToAnimeAdventures(AA)
 		local placed = getPlayerPlacedUnits(AA, waypoints)
 		local leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
 
-		local soldBlacklisted = false
-		for _, entry in ipairs(placed.all) do
-			if isBlacklistedUnit(AA, entry.id, entry.uinfo) and not entry.isMainUnit then
-				AA.invokeServer("sell_unit_ingame", entry.model)
-				state.stats.lastAction = "sold_blacklisted_" .. entry.id
-				soldBlacklisted = true
-			end
-		end
-		if soldBlacklisted then
-			placed = getPlayerPlacedUnits(AA, waypoints)
-			money = lp._stats.resource.Value
-			leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
-		end
-
-		if wave >= 29 and #placed.farms > 0 then
+		if wave >= 49 and #placed.farms > 0 then
 			for _, f in ipairs(placed.farms) do
 				if not (f.uinfo and f.uinfo.unsellable) then
 					AA.invokeServer("sell_unit_ingame", f.model)
@@ -1499,36 +1529,6 @@ local function attachToAnimeAdventures(AA)
 			money = lp._stats.resource.Value
 		end
 
-		if wave >= 12 and #placed.all >= 14 and leakThreat and ((leakThreat.prog >= 0.55 and leakThreat.aheadDpsCount == 0) or (leakThreat.isBoss and leakThreat.prog >= 0.78 and leakThreat.aheadDpsCount < 2)) then
-			local lanesList = getAllLanesWaypoints()
-			local leakLaneWps = lanesList[leakThreat.laneIdx or 1] or waypoints
-			local candidateToSell = nil
-			for _, d in ipairs(placed.dps) do
-				if not d.isMainUnit and not d.isUnique and not FUSION_PARTNER_UNITS[d.id] and d.pos then
-					local canReachRemaining = false
-					for k = leakThreat.wpIdx, #leakLaneWps do
-						local wp = leakLaneWps[k]
-						if (Vector3.new(d.pos.X, 0, d.pos.Z) - Vector3.new(wp.X, 0, wp.Z)).Magnitude <= (d.liveRange + 6) then
-							canReachRemaining = true
-							break
-						end
-					end
-					if not canReachRemaining then
-						if not candidateToSell or (d.valueScore or d.liveDamage) < (candidateToSell.valueScore or candidateToSell.liveDamage) then
-							candidateToSell = d
-						end
-					end
-				end
-			end
-			if candidateToSell then
-				AA.invokeServer("sell_unit_ingame", candidateToSell.model)
-				state.stats.lastAction = "sold_reposition_" .. candidateToSell.id
-				placed = getPlayerPlacedUnits(AA, waypoints)
-				money = lp._stats.resource.Value
-			end
-		end
-
-		local cfg = getConfig()
 		local activeMobs = {}
 		local totalWpsCount = math.max(1, #waypoints)
 		local hasEnemyInDpsRange = (leakThreat ~= nil)
@@ -1566,14 +1566,13 @@ local function attachToAnimeAdventures(AA)
 		for _, entry in ipairs(placed.all) do
 			local u = entry.model
 			local activeId = usc.get_active_id and usc.get_active_id(u)
-			if activeId and activeId ~= "vegito_fusion" and activeId ~= "himeno:final" then
-				local stats = u:FindFirstChild("_stats")
-				local isRepositionActive = REPOSITION_ACTIVE_UNITS[entry.id] or activeId == "law_2:shambles" or activeId == "julius:final_clock" or activeId == "lelouch:geass" or activeId == "kira:bite_the_dust"
-				local isBuffActive = BUFF_ACTIVE_UNITS[entry.id] or string.find(activeId, "buff") ~= nil or string.find(activeId, "erwin") ~= nil or string.find(activeId, "wendy") ~= nil or activeId == "pucci_heaven:final" or activeId == "kisuke:buff"
-				local isTimestopActive = TIMESTOP_UNITS[entry.id] or string.find(activeId, "time") ~= nil or string.find(activeId, "freeze") ~= nil or activeId == "shanks:haki" or activeId == "whitebeard:waves"
-				if isRepositionActive or isBuffActive or isTimestopActive then
-					if stats and stats:FindFirstChild("_auto_active") and stats._auto_active.Value == true then
-						stats._auto_active.Value = false
+			if activeId then
+				local isBuffActive = BUFF_ACTIVE_UNITS[entry.id] or string.find(activeId, "buff") ~= nil or string.find(activeId, "erwin") ~= nil
+				local isTimestopActive = TIMESTOP_UNITS[entry.id] or string.find(activeId, "time") ~= nil or string.find(activeId, "freeze") ~= nil
+				if isBuffActive or isTimestopActive then
+					local st = u:FindFirstChild("_stats")
+					if st and st:FindFirstChild("_auto_active") and st._auto_active.Value == true then
+						st._auto_active.Value = false
 					end
 					if u:GetAttribute("_auto_active") == true then
 						pcall(function()
@@ -1581,88 +1580,94 @@ local function attachToAnimeAdventures(AA)
 						end)
 					end
 				end
+			end
+		end
 
-				local cd = stats and stats:FindFirstChild("active_attack_cooldown") and stats.active_attack_cooldown.Value or 0
-				local lastCast = stats and stats:FindFirstChild("last_active_cast") and stats.last_active_cast.Value or 0
-				if (cd - (tick() - lastCast)) <= 0 then
+		if not placed.vegitoEntry and placed.vegoEntry and placed.carrotEntry then
+			if placed.vegoEntry.upgrade >= 7 and placed.carrotEntry.upgrade >= 7 then
+				local vegoTrait = placed.vegoEntry.traitMult or 1.0
+				local carrotTrait = placed.carrotEntry.traitMult or 1.0
+				local casterEntry = (carrotTrait > vegoTrait) and placed.carrotEntry or placed.vegoEntry
+				local casterModel = casterEntry.model
+				local activeId = usc.get_active_id and usc.get_active_id(casterModel)
+				if (activeId == "vegito_fusion_vegeta" or activeId == "vegito_fusion") and (tick() - (state.lastFusionCastAttempt or 0)) >= 1.5 then
+					state.lastFusionCastAttempt = tick()
+					state.fusionTryCount = (state.fusionTryCount or 0) + 1
+					pcall(function()
+						AA.invokeServer("use_active_attack", casterModel)
+					end)
+					state.stats.activesUsed += 1
+					state.stats.vegitoFusions += 1
+					state.stats.lastAction = "cast_vegito_fusion"
+					task.wait(0.3)
+					placed = getPlayerPlacedUnits(AA, waypoints)
+				end
+			end
+		else
+			state.fusionTryCount = 0
+		end
+
+		if #placed.erwins > 0 then
+			local numErwins = #placed.erwins
+			local staggerInterval = 19.5
+			if numErwins >= 4 then
+				staggerInterval = 15.2
+			elseif numErwins == 2 then
+				staggerInterval = 29.0
+			elseif numErwins == 1 then
+				staggerInterval = 30.0
+			end
+
+			if (tick() - (state.lastErwinBuffCast or 0)) >= staggerInterval then
+				local bestErwin = nil
+				local oldestCast = math.huge
+				for _, erw in ipairs(placed.erwins) do
+					local u = erw.model
+					local st = u:FindFirstChild("_stats")
+					local cd = st and st:FindFirstChild("active_attack_cooldown") and st.active_attack_cooldown.Value or 60
+					local lastCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
+					local queued = st and st:FindFirstChild("active_queued_or_using") and st.active_queued_or_using.Value or false
+					if not queued and (cd - (tick() - lastCast)) <= 0 then
+						if lastCast < oldestCast then
+							oldestCast = lastCast
+							bestErwin = erw
+						end
+					end
+				end
+
+				if bestErwin then
+					local castOk = pcall(function()
+						AA.invokeServer("use_active_attack", bestErwin.model)
+					end)
+					if castOk then
+						state.lastErwinBuffCast = tick()
+						state.stats.activesUsed += 1
+						state.stats.erwinBuffsCast += 1
+						state.stats.lastAction = string.format("perfect_erwin_buff_%d_of_%d", (state.stats.erwinBuffsCast % numErwins) + 1, numErwins)
+					end
+				end
+			end
+		end
+
+		for _, entry in ipairs(placed.all) do
+			local u = entry.model
+			local activeId = usc.get_active_id and usc.get_active_id(u)
+			if activeId and activeId ~= "vegito_fusion" and activeId ~= "vegito_fusion_vegeta" and activeId ~= "erwin:buff_units" and activeId ~= "himeno:final" then
+				local st = u:FindFirstChild("_stats")
+				local cd = st and st:FindFirstChild("active_attack_cooldown") and st.active_attack_cooldown.Value or 0
+				local lastCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
+				local queued = st and st:FindFirstChild("active_queued_or_using") and st.active_queued_or_using.Value or false
+				if not queued and (cd - (tick() - lastCast)) <= 0 then
+					local isTimestopActive = TIMESTOP_UNITS[entry.id] or string.find(activeId, "time") ~= nil or string.find(activeId, "freeze") ~= nil
 					local allowCast = true
-					local customPayload = nil
-
-					if activeId == "vegito_fusion_vegeta" then
-						local hasGokuReadyOnMap = false
-						for _, other in ipairs(placed.dps) do
-							if FUSION_PARTNER_UNITS[other.id] and (other.upgrade or 0) >= 7 then
-								hasGokuReadyOnMap = true
-								break
-							end
-						end
-						if not hasGokuReadyOnMap then
+					if isTimestopActive and cfg.SMART_TIMESTOP ~= false then
+						if not hasEnemyInDpsRange or (tick() - (state.lastTimestopCast or 0)) < 10.2 then
 							allowCast = false
-						else
-							local hasMainVegetaEquipped = hasEquippedUnitId(AA, entry.id)
-							if hasMainVegetaEquipped and not entry.isMainUnit and not entry.isUnique then
-								allowCast = false
-							else
-								for _, other in ipairs(placed.dps) do
-									if other.model ~= entry.model and other.id == entry.id and (other.maxPotentialDps or 0) > (entry.maxPotentialDps or 0) * 1.15 then
-										allowCast = false
-										break
-									end
-								end
-							end
-						end
-					elseif isRepositionActive then
-						allowCast = false
-						if entry.pos and entry.liveRange > 0 then
-							local entryProg = (entry.wpIdx or 1) / totalWpsCount
-							local mobsInRange = 0
-							local hasExitingMob = false
-							local maxLeadRatio = 0
-							for _, mob in ipairs(activeMobs) do
-								if activeId ~= "julius:final_clock" or not mob.isBoss then
-									local dist2D = (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(mob.pos.X, 0, mob.pos.Z)).Magnitude
-									if dist2D <= entry.liveRange then
-										mobsInRange += 1
-										if mob.prog >= entryProg then
-											local exitRatio = dist2D / math.max(1, entry.liveRange)
-											if exitRatio > maxLeadRatio then
-												maxLeadRatio = exitRatio
-											end
-											if exitRatio >= 0.62 or mob.prog >= 0.78 then
-												hasExitingMob = true
-											end
-										end
-									end
-								end
-							end
-							if hasExitingMob or (mobsInRange >= 3 and maxLeadRatio >= 0.45) then
-								allowCast = true
-							end
-						end
-					elseif isBuffActive and cfg.STAGGER_BUFF_ACTIVES ~= false then
-						local isMagicBuff = (entry.id == "wendy" or entry.id == "wendy_evolved" or entry.id == "leafa" or entry.id == "leafa_evolved" or activeId == "wendy:buff_units" or activeId == "leafa:buff")
-						local isPhysBuff = (entry.id == "erwin" or entry.id == "erwin_halloween" or entry.id == "erwin_school" or activeId == "erwin:buff_units")
-						if isMagicBuff then
-							if (tick() - (state.lastMagicBuffCast or 0)) < 15.2 then
-								allowCast = false
-							end
-						elseif isPhysBuff then
-							if (tick() - (state.lastPhysBuffCast or 0)) < 15.2 then
-								allowCast = false
-							end
-						else
-							if (tick() - (state.lastBuffActiveCast or 0)) < 15.2 then
-								allowCast = false
-							end
-						end
-					elseif isTimestopActive and cfg.SMART_TIMESTOP ~= false then
-						if not hasEnemyInDpsRange or (tick() - (state.lastTimestopCast or 0)) < 9.5 then
-							allowCast = false
-						elseif entry.pos and entry.liveRange > 0 and activeId ~= "dio_heaven:timestop" and activeId ~= "kc:time_erase" then
+						elseif entry.pos and entry.liveRange > 0 then
 							local anyInUnitRange = false
 							for _, mob in ipairs(activeMobs) do
 								local dist2D = (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(mob.pos.X, 0, mob.pos.Z)).Magnitude
-								if dist2D <= (entry.liveRange + 2) then
+								if dist2D <= (entry.liveRange + 1.5) then
 									anyInUnitRange = true
 									break
 								end
@@ -1671,50 +1676,14 @@ local function attachToAnimeAdventures(AA)
 								allowCast = false
 							end
 						end
-					elseif activeId == "death_note_active" then
-						allowCast = false
-						local bestTarget = nil
-						local bestScore = 0
-						for _, mob in ipairs(activeMobs) do
-							if not mob.isBoss and mob.prog >= 0.40 then
-								local score = mob.hp * (0.5 + mob.prog)
-								if score > bestScore then
-									bestScore = score
-									bestTarget = mob.model
-								end
-							end
-						end
-						if bestTarget then
-							allowCast = true
-							customPayload = { death_note_active_target = bestTarget }
-						end
-					elseif activeId == "aizen:illusion" then
-						if not leakThreat or leakThreat.prog < 0.70 then
-							allowCast = false
-						end
 					end
-
 					if allowCast then
 						pcall(function()
-							if customPayload then
-								AA.invokeServer("use_active_attack", u, customPayload)
-							else
-								AA.invokeServer("use_active_attack", u)
-							end
+							AA.invokeServer("use_active_attack", u)
 							state.stats.activesUsed += 1
-							if isBuffActive then
-								state.lastBuffActiveCast = tick()
-								if entry.id == "wendy" or entry.id == "wendy_evolved" or entry.id == "leafa" or entry.id == "leafa_evolved" or activeId == "wendy:buff_units" or activeId == "leafa:buff" then
-									state.lastMagicBuffCast = tick()
-								elseif entry.id == "erwin" or entry.id == "erwin_halloween" or entry.id == "erwin_school" or activeId == "erwin:buff_units" then
-									state.lastPhysBuffCast = tick()
-								end
-							elseif isTimestopActive then
+							if isTimestopActive then
 								state.lastTimestopCast = tick()
-							elseif isRepositionActive then
-								state.stats.lastAction = "reposition_active_" .. entry.id
-							elseif activeId == "vegito_fusion_vegeta" then
-								state.stats.lastAction = "fused_vegito"
+								state.stats.lastAction = "timestop_" .. entry.id
 							end
 						end)
 					end
@@ -1723,627 +1692,327 @@ local function attachToAnimeAdventures(AA)
 		end
 
 		local spawnMult = usc.calculate_spawn_cost_multiplier(ucsc.session)
+		state.failedPositions = state.failedPositions or {}
+		if wave <= 1 and #state.failedPositions > 0 then
+			state.failedPositions = {}
+		end
 
-		local airTargetGoal = (wave <= 8 and (wave * 3500)) or (wave <= 14 and (wave * 8000)) or (wave * 16500)
-		local needMoreAirDps = (placed.totalAirDamage < airTargetGoal) or (wave >= 14 and placed.totalAirDamage < placed.totalDamage * 0.35)
-		local bestDpsTarget = nil
-		local bestDpsTargetScore = -1
-		local bestMergeTarget = nil
-		local bestMergeTargetScore = -1
-		for _, d in ipairs(placed.dps) do
-			if not d.isFarm and not d.isSupport and not d.isNonAttacking and (d.liveDamage >= 3000 or d.isMainUnit or d.isUnique) and d.rarityScore >= 500 then
-				local dScore = d.liveDamage
-					+ (d.maxPotentialDps or 0) * 0.65
-					+ (d.isUnique and 3500000 or 0)
-					+ (d.isMainUnit and 1200000 or 0)
-					+ d.rarityScore * 15
-					+ d.upgrade * 500
-					+ ((needMoreAirDps and d.canAir) and 450000 or 0)
-				if leakThreat and d.pos then
-					local dist = (Vector3.new(d.pos.X, 0, d.pos.Z) - Vector3.new(leakThreat.pos.X, 0, leakThreat.pos.Z)).Magnitude
-					if dist <= (d.liveRange + 5) then
-						dScore += 500000
-					end
-				end
-				if dScore > bestDpsTargetScore then
-					bestDpsTargetScore = dScore
-					bestDpsTarget = d
-				end
-				if (placed.byId[d.id] or 0) >= 2 and d.pos then
-					for _, other in ipairs(placed.dps) do
-						if other.model ~= d.model and other.id == d.id and other.pos then
-							local dist = (Vector3.new(d.pos.X, 0, d.pos.Z) - Vector3.new(other.pos.X, 0, other.pos.Z)).Magnitude
-							if dist <= d.liveRange then
-								local mScore = (d.isUnique and 5000000 or 0) + (d.isMainUnit and 1500000 or 0) + (d.maxPotentialDps or 0) + d.liveDamage
-								if mScore > bestMergeTargetScore then
-									bestMergeTargetScore = mScore
-									bestMergeTarget = d
-								end
-							end
-						end
-					end
+		local bestPlacedCarry = placed.vegitoEntry or placed.vegoEntry
+		if not bestPlacedCarry then
+			local bestPlacedScore = -1
+			for _, d in ipairs(placed.dps) do
+				local sc = (d.isUnique and 1000000 or 0) + ((d.traitMult or 1) * 50000) + (d.rarityScore * 100) + d.liveDamage
+				if sc > bestPlacedScore then
+					bestPlacedScore = sc
+					bestPlacedCarry = d
 				end
 			end
 		end
 
-		local maxDpsForWave = 3
-		if wave >= 21 then
-			maxDpsForWave = 10
-		elseif wave >= 16 then
-			maxDpsForWave = 8
-		elseif wave >= 11 then
-			maxDpsForWave = 6
-		elseif wave >= 6 then
-			maxDpsForWave = 5
-		end
-		if leakThreat and leakThreat.aheadDpsCount == 0 then
-			maxDpsForWave = math.min(11, math.max(maxDpsForWave, #placed.dps + 1))
-		end
+		local primaryCarryAnchorPos = (placed.vegitoEntry and placed.vegitoEntry.pos)
+			or (placed.vegoEntry and placed.vegoEntry.pos)
+			or (bestPlacedCarry and bestPlacedCarry.pos)
+			or (placed.carrotEntry and placed.carrotEntry.pos)
+			or (placed.homuraEntry and placed.homuraEntry.pos)
+		local firstErwinPos = (#placed.erwins > 0 and placed.erwins[1].pos) or nil
 
-		local hasHighTierInHotbar = false
-		local hasAnyAttackingInHotbar = false
-		local savingForSpellCost = 0
-		local needMoreMainUnits = canSummonMoreMainUnits(AA, placed)
-		local gateSaveReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and wave >= 7 and #placed.dps >= 2 and placed.totalAirDamage >= math.max(20000, wave * 3000)
-		local summonSaveReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and wave >= 10 and #placed.dps >= 3 and placed.totalAirDamage >= math.max(35000, wave * 3800)
+		local hasVegito = placed.vegitoEntry ~= nil
+		local hasVego = placed.vegoEntry ~= nil
+		local hasCarrot = placed.carrotEntry ~= nil
+		local hasIdol = placed.idolEntry ~= nil
+		local totalFarmsPlaced = #placed.farms
+		local speedwagonCount = placed.byId["speedwagon"] or 0
+		local myErwinCount = #placed.erwins
+		local globalErwinCount = getGlobalUnitCountById("erwin")
+		local targetErwins = math.min(cfg.TARGET_ERWIN_COUNT or 3, 6 - math.max(0, globalErwinCount - myErwinCount))
+
+		local deckHasVego = false
+		local deckHasCarrot = false
+		local deckSlots = {}
+		local bestDeckCarrySlot = nil
+		local bestDeckCarryScore = -1
+		local bestDeckAirSlot = nil
+		local bestDeckAirScore = -1
+
 		for i = 1, 6 do
 			local slot = tostring(i)
-			local spellId = ucsc.session.ingame_spells and ucsc.session.ingame_spells[slot]
-			if spellId and needMoreMainUnits then
-				local sinfo = IngameSpells and IngameSpells[spellId]
-				local scost = sinfo and sinfo.cost or 0
-				if (spellId == "gate" and gateSaveReady) or (spellId == "summon" and summonSaveReady) then
-					savingForSpellCost = math.max(savingForSpellCost, scost)
-				end
-			end
 			local uuid, udata = ucsc.get_unit_in_equipped_slot(slot)
-			if udata and Units[udata.unit_id] then
-				local ui = Units[udata.unit_id]
-				if not isNonAttackingUnit(AA, udata.unit_id, ui) and not isBlacklistedUnit(AA, udata.unit_id, ui) then
-					hasAnyAttackingInHotbar = true
-					if (RARITY_SCORE[ui.rarity] or 0) >= 500 or isMainEquippedUnit(AA, uuid, udata.unit_id) then
-						hasHighTierInHotbar = true
+			if uuid and udata then
+				local unitId = udata.unit_id
+				local uinfo = Units[unitId]
+				if uinfo then
+					if VEGO_UNITS[unitId] then
+						deckHasVego = true
+					elseif CARROT_UNITS[unitId] then
+						deckHasCarrot = true
 					end
+					local traitInfo = getUnitTraitInfo(AA, uuid)
+					local isFarm = isFarmUnit(AA, unitId, uinfo)
+					local isIdol = IDOL_UNITS[unitId] == true
+					local isSupport = SUPPORT_UNITS[unitId] or isIdol or (uinfo and uinfo._show_as_buff_unit) or (isNonAttackingUnit(AA, unitId, uinfo) and not isFarm)
+					local rarityScore = (uinfo and RARITY_SCORE[uinfo.rarity]) or 500
+					local canAir = (uinfo.hill_unit == true) or (uinfo.hybrid_placement == true) or CARROT_UNITS[unitId] == true
+					local carryScore = (traitInfo.isUnique and 5000 or 0) + (traitInfo.traitMult * 600) + rarityScore
+					if not isFarm and not isSupport then
+						if carryScore > bestDeckCarryScore and not uinfo.hill_unit then
+							bestDeckCarryScore = carryScore
+							bestDeckCarrySlot = slot
+						end
+						if canAir and carryScore > bestDeckAirScore then
+							bestDeckAirScore = carryScore
+							bestDeckAirSlot = slot
+						end
+					end
+					deckSlots[i] = {
+						slot = slot,
+						uuid = uuid,
+						unitId = unitId,
+						uinfo = uinfo,
+						traitInfo = traitInfo,
+						isFarm = isFarm,
+						isIdol = isIdol,
+						isSupport = isSupport,
+						rarityScore = rarityScore,
+						canAir = canAir,
+						carryScore = carryScore,
+					}
 				end
 			end
 		end
 
+		local deckHasFusionPair = (deckHasVego and deckHasCarrot) or hasVegito or (hasVego and hasCarrot)
+		local hasFrontCarryPlaced = hasVegito or hasVego or (#placed.dps >= 1)
+		local hasAirCarryPlaced = hasVegito or hasCarrot or (placed.airTargetCount >= 1)
+
+		local slotCandidates = {}
 		for i = 1, 6 do
-			local slot = tostring(i)
-			local spellId = ucsc.session.ingame_spells and ucsc.session.ingame_spells[slot]
-			if spellId then
-				local sinfo = IngameSpells and IngameSpells[spellId]
-				local scost = sinfo and sinfo.cost or 0
-				if spellId == "sell_refund" or spellId == "ritual" then
-					AA.invokeServer("delete_ingame_spell", slot)
-					state.stats.spellsDeleted += 1
-					state.stats.lastAction = "del_spell_" .. spellId
-				elseif spellId == "sacrifice" then
-					if #placed.all >= 13 and bestMergeTarget and money >= scost and (savingForSpellCost == 0 or (money - scost) >= savingForSpellCost) then
-						AA.invokeServer("use_ingame_spell", slot, bestMergeTarget.model)
-						state.stats.spellsUsed += 1
-						state.stats.lastAction = "use_spell_merge_" .. bestMergeTarget.id
-						money = lp._stats.resource.Value
-					else
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
-						state.stats.lastAction = "del_spell_sacrifice"
+			local ds = deckSlots[i]
+			if ds and not ucsc.session.collection:is_unit_on_cooldown(ds.uuid) then
+				local slot = ds.slot
+				local uuid = ds.uuid
+				local unitId = ds.unitId
+				local uinfo = ds.uinfo
+				local spawnCost = math.ceil((tonumber(uinfo.cost) or 500) * spawnMult)
+				local placedCount = placed.byId[unitId] or 0
+				local unitCap = ds.traitInfo.isUnique and 1 or (tonumber(uinfo.spawn_cap) or 3)
+				local spawnPriority = 0
+				local placementMode = "front"
+				local fusionPartnerPos = nil
+				local preferNearHill = false
+
+				if ds.isFarm then
+					placementMode = "farm"
+					if unitId == "speedwagon" then
+						if speedwagonCount == 0 and wave <= 2 then
+							spawnPriority = 1000
+						elseif speedwagonCount < unitCap and (hasFrontCarryPlaced or wave >= 2) and wave <= 20 then
+							spawnPriority = 850 - speedwagonCount * 30
+						end
+					elseif placedCount < unitCap and wave <= 20 then
+						if totalFarmsPlaced == 0 and tonumber(uinfo.cost or 9999) <= 650 and wave <= 2 then
+							spawnPriority = 995
+						elseif hasFrontCarryPlaced or wave >= 3 then
+							spawnPriority = 840 - placedCount * 30
+						end
 					end
-				elseif spellId == "gate" then
-					if not needMoreMainUnits then
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
-						state.stats.lastAction = "del_spell_gate_capped"
-					elseif money >= scost and (#placed.dps >= 1 or not hasAnyAttackingInHotbar) then
-						AA.invokeServer("use_ingame_spell", slot)
-						state.stats.spellsUsed += 1
-						state.stats.lastAction = "use_spell_gate"
-						money = lp._stats.resource.Value
+				elseif deckHasFusionPair and VEGO_UNITS[unitId] then
+					placementMode = "front"
+					preferNearHill = true
+					if placed.carrotEntry and placed.carrotEntry.pos then
+						fusionPartnerPos = placed.carrotEntry.pos
 					end
-				elseif spellId == "summon" then
-					if not needMoreMainUnits then
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
-						state.stats.lastAction = "del_spell_summon_capped"
-					elseif money >= scost and (#placed.dps >= 1 or not hasAnyAttackingInHotbar) then
-						AA.invokeServer("use_ingame_spell", slot)
-						state.stats.spellsUsed += 1
-						state.stats.lastAction = "use_spell_summon"
-						money = lp._stats.resource.Value
-					elseif #placed.dps == 0 and not hasAnyAttackingInHotbar and money < scost then
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
-						state.stats.lastAction = "del_spell_deadlock_summon"
+					if not hasVegito and not hasVego then
+						spawnPriority = 980
 					end
-				elseif spellId == "random_buff" then
-					if bestDpsTarget and (bestDpsTarget.liveDamage >= 5000 or bestDpsTarget.isMainUnit) and money >= scost and (savingForSpellCost == 0 or (money - scost) >= savingForSpellCost) then
-						AA.invokeServer("use_ingame_spell", slot, bestDpsTarget.model)
-						state.stats.spellsUsed += 1
-						state.stats.lastAction = "use_spell_buff_" .. bestDpsTarget.id
-						money = lp._stats.resource.Value
-					elseif #placed.dps == 0 and not hasAnyAttackingInHotbar then
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
-						state.stats.lastAction = "del_spell_deadlock_buff"
+				elseif deckHasFusionPair and CARROT_UNITS[unitId] then
+					placementMode = "front"
+					if placed.vegoEntry and placed.vegoEntry.pos then
+						fusionPartnerPos = placed.vegoEntry.pos
 					end
-				elseif spellId == "clone" then
-					if bestDpsTarget and (bestDpsTarget.upgrade >= 3 or bestDpsTarget.liveDamage >= 25000 or bestDpsTarget.isMainUnit) and money >= scost and (savingForSpellCost == 0 or (money - scost) >= savingForSpellCost) then
-						AA.invokeServer("use_ingame_spell", slot, bestDpsTarget.model)
-						state.stats.spellsUsed += 1
-						state.stats.lastAction = "use_spell_clone_" .. bestDpsTarget.id
-						money = lp._stats.resource.Value
-					elseif (wave <= 4 and #placed.dps < 2) or (#placed.dps == 0 and not hasAnyAttackingInHotbar) then
-						AA.invokeServer("delete_ingame_spell", slot)
-						state.stats.spellsDeleted += 1
+					if not hasVegito and not hasCarrot and (hasVego or totalFarmsPlaced >= 1) then
+						spawnPriority = 920
+					end
+				elseif ds.isIdol then
+					placementMode = primaryCarryAnchorPos and "buffer" or "front"
+					if not hasIdol and hasFrontCarryPlaced and (hasAirCarryPlaced or wave >= 3) and (totalFarmsPlaced >= 2 or wave >= 4) then
+						spawnPriority = 820
+					end
+				elseif TIMESTOP_UNITS[unitId] then
+					placementMode = "front"
+					if primaryCarryAnchorPos then
+						fusionPartnerPos = primaryCarryAnchorPos
+					end
+					if placedCount == 0 and hasFrontCarryPlaced and (hasAirCarryPlaced or wave >= 3) and (totalFarmsPlaced >= 3 or wave >= 4) then
+						spawnPriority = 790
+					elseif placedCount < unitCap and (hasVegito or (#placed.dps >= 2 and wave >= 8)) and myErwinCount >= targetErwins then
+						spawnPriority = 710 - placedCount * 20
+					end
+				elseif unitId == "erwin" or unitId == "erwin_school" or unitId == "erwin_halloween" then
+					placementMode = primaryCarryAnchorPos and "buffer" or "front"
+					if myErwinCount < targetErwins and globalErwinCount < 6 and hasFrontCarryPlaced and (hasAirCarryPlaced or wave >= 3) and (totalFarmsPlaced >= 3 or wave >= 4) then
+						spawnPriority = 750 - myErwinCount * 15
+					end
+				elseif ds.isSupport then
+					placementMode = primaryCarryAnchorPos and "buffer" or "front"
+					local supCap = math.min(unitCap, 3)
+					if placedCount < supCap and hasFrontCarryPlaced and (totalFarmsPlaced >= 2 or wave >= 4) then
+						spawnPriority = 740 - placedCount * 20
+					end
+				elseif placedCount < unitCap then
+					placementMode = "front"
+					if primaryCarryAnchorPos then
+						fusionPartnerPos = primaryCarryAnchorPos
+					end
+					if leakThreat and leakThreat.aheadDpsCount == 0 and (not leakThreat.isFlying or ds.canAir) then
+						placementMode = "leak"
+						spawnPriority = 990 + (ds.carryScore / 100)
+					elseif not hasFrontCarryPlaced and slot == bestDeckCarrySlot then
+						spawnPriority = 975
+					elseif not hasAirCarryPlaced and ds.canAir and (slot == bestDeckAirSlot or wave >= 2) then
+						spawnPriority = 915
+					elseif hasFrontCarryPlaced and (totalFarmsPlaced >= 2 or wave >= 3) then
+						spawnPriority = 730 + (ds.traitInfo.isUnique and 140 or 0) + math.min(60, ds.rarityScore / 10) - (placedCount * 25)
 					end
 				end
-			else
-				local uuid, udata = ucsc.get_unit_in_equipped_slot(slot)
-				if uuid and udata then
-					local unitId = udata.unit_id
-					local uinfo = Units[unitId]
-					if uinfo then
-						local isMain = isMainEquippedUnit(AA, uuid, unitId)
-						local traitInfo = getUnitTraitInfo(AA, uuid)
-						local isUniqueHotbar = traitInfo.isUnique
-						if isUniqueHotbar then
-							isMain = true
-						end
-						local hasEquippedSameId, _, eqIsUnique = hasEquippedUnitId(AA, unitId)
-						local isNonUniqueCopyOfEquippedUnique = hasEquippedSameId and eqIsUnique and not isMain and not isUniqueHotbar
 
-						local isFarm = isFarmUnit(AA, unitId, uinfo)
-						local isIdol = IDOL_UNITS[unitId] == true
-						local isNonAtk = isNonAttackingUnit(AA, unitId, uinfo)
-						local isSupport = SUPPORT_UNITS[unitId] or isIdol or (isNonAtk and not isFarm)
-						local rarityScore = RARITY_SCORE[uinfo.rarity] or 100
-						if (isMain or isUniqueHotbar) and not isFarm and not isSupport then
-							rarityScore = math.max(rarityScore, 950)
-						end
-						local spawnCost = math.ceil((tonumber(uinfo.cost) or 500) * spawnMult)
-						local currentSameCount = placed.byId[unitId] or 0
-						local currentMainSameCount = placed.mainById[unitId] or 0
-						local unitCap = (isUniqueHotbar or eqIsUnique) and 1 or (tonumber(uinfo.spawn_cap) or 4)
+				if spawnPriority > 0 then
+					table.insert(slotCandidates, {
+						slot = slot,
+						uuid = uuid,
+						unitId = unitId,
+						uinfo = uinfo,
+						cost = spawnCost,
+						priority = spawnPriority,
+						mode = placementMode,
+						fusionPartnerPos = fusionPartnerPos,
+						preferNearHill = preferNearHill,
+					})
+				end
+			end
+		end
 
-						local placedTimestopCount = 0
-						for tsId, _ in pairs(TIMESTOP_UNITS) do
-							placedTimestopCount += (placed.byId[tsId] or 0)
-						end
-						local isPriorityKeep = (not isNonUniqueCopyOfEquippedUnique)
-							and (
-								((isMain or isUniqueHotbar) and currentMainSameCount < unitCap)
-								or (FUSION_PARTNER_UNITS[unitId] and currentSameCount == 0 and (placed.byId["vegito"] or 0) == 0)
-								or (TIMESTOP_UNITS[unitId] and placedTimestopCount == 0)
-							)
-						local shouldDelete = false
-						local shouldSpawn = false
-						local placementMode = TRAP_UNITS[unitId] and "anchor" or "front"
-						local targetWp = nil
+		table.sort(slotCandidates, function(a, b)
+			return a.priority > b.priority
+		end)
 
-						if isNonUniqueCopyOfEquippedUnique then
-							shouldDelete = true
-						elseif isBlacklistedUnit(AA, unitId, uinfo) and not isMain and not isUniqueHotbar then
-							shouldDelete = true
-						elseif (isMain or isUniqueHotbar) and currentMainSameCount >= unitCap then
-							shouldDelete = true
-						elseif isPriorityKeep and not isFarm and not isSupport then
-							if (isMain or isUniqueHotbar) and currentSameCount >= unitCap and money >= spawnCost then
-								for _, d in ipairs(placed.dps) do
-									if d.id == unitId and not d.isMainUnit and not d.isUnique then
-										AA.invokeServer("sell_unit_ingame", d.model)
-										state.stats.unitsSold = (state.stats.unitsSold or 0) + 1
-										placed = getPlayerPlacedUnits(AA, waypoints)
-										currentSameCount = placed.byId[unitId] or 0
-										break
-									end
-								end
-							end
-							if currentSameCount < unitCap then
-								shouldSpawn = true
-								if leakThreat and leakThreat.prog >= 0.72 and leakThreat.aheadDpsCount == 0 then
-									placementMode = "leak"
-									targetWp = leakThreat.wpIdx
-								else
-									placementMode = "front"
-								end
-								if #placed.all >= 14 and money >= spawnCost then
-									if #placed.farms > 0 then
-										AA.invokeServer("sell_unit_ingame", placed.farms[1].model)
-										state.stats.unitsSold = (state.stats.unitsSold or 0) + 1
-									else
-										local weakest = nil
-										for _, d in ipairs(placed.dps) do
-											if not d.isMainUnit and not d.isUnique and not FUSION_PARTNER_UNITS[d.id] and not TIMESTOP_UNITS[d.id] and (not weakest or (d.valueScore or d.liveDamage) < (weakest.valueScore or weakest.liveDamage)) then
-												weakest = d
-											end
-										end
-										if weakest then
-											AA.invokeServer("sell_unit_ingame", weakest.model)
-											state.stats.unitsSold = (state.stats.unitsSold or 0) + 1
-										end
-									end
-									placed = getPlayerPlacedUnits(AA, waypoints)
-								end
-							end
-						elseif isFarm then
-							if wave >= 17 or #placed.farms >= 3 or currentSameCount >= unitCap or (leakThreat and wave >= 10) then
-								shouldDelete = true
-							elseif (#placed.dps >= 1 or (not hasAnyAttackingInHotbar and #placed.farms == 0)) and not leakThreat then
-								shouldSpawn = true
-								placementMode = "farm"
-							end
-						elseif isIdol then
-							local hasAnyIdolPlaced = (placed.byId["hoshino"] or 0) + (placed.byId["hoshino_evolved"] or 0) + (placed.byId["hoshino_2"] or 0) + (placed.byId["hoshino_2_evolved"] or 0) > 0
-							if hasAnyIdolPlaced or wave >= 22 or leakThreat then
-								shouldDelete = true
-							elseif #placed.dps >= 2 then
-								shouldSpawn = true
-								placementMode = "farm"
-							end
-						elseif isSupport then
-							if currentSameCount >= 1 or #placed.supports >= 2 or leakThreat or wave < 8 then
-								shouldDelete = true
-							elseif #placed.dps >= 4 then
-								shouldSpawn = true
-								placementMode = "front"
-							else
-								shouldDelete = true
-							end
-						else
-							local isAirUnit = unitCanTargetAirStatic(AA, unitId, uinfo)
-							local maxRandomCopies = (isAirUnit and placed.airTargetCount < 2 and wave <= 6) and 2 or 1
-							if currentSameCount >= unitCap or (not isMain and not isUniqueHotbar and currentSameCount >= maxRandomCopies) then
-								shouldDelete = true
-							elseif leakThreat and leakThreat.prog >= 0.72 and leakThreat.aheadDpsCount == 0 and (rarityScore >= 500 or (rarityScore >= 300 and wave <= 8)) and (not leakThreat.isFlying or isAirUnit) then
-								shouldSpawn = true
-								placementMode = "leak"
-								targetWp = leakThreat.wpIdx
-							elseif rarityScore < 500 then
-								if (#placed.dps == 0 and not hasHighTierInHotbar and wave <= 4) or (isAirUnit and placed.airTargetCount < 2 and wave <= 8) then
-									shouldSpawn = true
-									placementMode = "front"
-								else
-									shouldDelete = true
-								end
-							else
-								if #placed.dps >= maxDpsForWave or #placed.all >= 14 then
-									if wave >= 7 and money >= spawnCost then
-										for _, d in ipairs(placed.dps) do
-											local isLowDuplicate = (placed.byId[d.id] or 0) >= 2 and d.upgrade <= 2
-											if (d.rarityScore < 500 or isLowDuplicate) and not d.isMainUnit and not d.isUnique and (not d.canAir or placed.airTargetCount >= 3 or isAirUnit) then
-												AA.invokeServer("sell_unit_ingame", d.model)
-												state.stats.unitsSold = (state.stats.unitsSold or 0) + 1
-												placed = getPlayerPlacedUnits(AA, waypoints)
-												break
-											end
-										end
-									end
-								end
-								if #placed.dps < maxDpsForWave or (isAirUnit and placed.airTargetCount < 3 and #placed.dps < maxDpsForWave + 1) then
-									shouldSpawn = true
-									placementMode = TRAP_UNITS[unitId] and "anchor" or "front"
-								else
-									shouldDelete = true
-								end
-							end
-						end
-
-						if savingForSpellCost > 0 and not isPriorityKeep and (not leakThreat or leakThreat.aheadDpsCount > 0) and (money - spawnCost) < savingForSpellCost then
-							shouldSpawn = false
-							if #placed.dps >= 4 and not isFarm and not isIdol then
-								shouldDelete = true
-							end
-						end
-
-						if #placed.all >= 15 and not isPriorityKeep then
-							shouldSpawn = false
-							shouldDelete = true
-						end
-
-						state.failedPositions = state.failedPositions or {}
-						state.unitFailCounts = state.unitFailCounts or {}
-						if wave <= 1 and #state.failedPositions > 0 then
-							state.failedPositions = {}
-							state.unitFailCounts = {}
-						end
-
-						if shouldDelete and not isPriorityKeep then
-							AA.invokeServer("delete_ingame_temporary_unit", slot)
-							state.stats.unitsDeleted += 1
-							state.stats.lastAction = "del_unit_" .. unitId
-						elseif shouldSpawn and money >= spawnCost and not ucsc.session.collection:is_unit_on_cooldown(uuid) then
-							local fusionPartnerPos = nil
-							local preferNearHill = false
-							if unitId == "goku_ssj3_evolved" or unitId == "goku_ssj3" then
-								for _, d in ipairs(placed.dps) do
-									if (d.id == "vegeta_majin_evolved" or d.id == "vegeta_majin") and d.pos then
-										if not fusionPartnerPos or d.isUnique or d.isMainUnit then
-											fusionPartnerPos = d.pos
-										end
-									end
-								end
-							elseif unitId == "vegeta_majin_evolved" or unitId == "vegeta_majin" then
-								preferNearHill = true
-								for _, d in ipairs(placed.dps) do
-									if (d.id == "goku_ssj3_evolved" or d.id == "goku_ssj3") and d.pos then
-										fusionPartnerPos = d.pos
-										break
-									end
-								end
-							end
-
-							local cf, hitPos = findValidPlacementCFrame(AA, uinfo, placementMode, targetWp, state.failedPositions, leakThreat and leakThreat.pos, fusionPartnerPos, preferNearHill)
-							if cf and hitPos then
-								local prevCount = #placed.all
-								local prevMoney = money
-								AA.invokeServer("spawn_unit", uuid, cf)
-								local newPlaced = getPlayerPlacedUnits(AA, waypoints)
-								local newMoney = lp._stats.resource.Value
-								if #newPlaced.all > prevCount or newMoney < (prevMoney - 50) then
-									state.unitFailCounts[uuid] = 0
-									state.stats.unitsSpawned += 1
-									if placementMode == "leak" then
-										state.stats.leaksHandled = (state.stats.leaksHandled or 0) + 1
-										state.stats.lastAction = "spawn_leak_" .. unitId
-									else
-										state.stats.lastAction = "spawn_" .. unitId
-									end
-									placed = newPlaced
-									money = newMoney
-									leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
-								else
-									table.insert(state.failedPositions, hitPos)
-									state.unitFailCounts[uuid] = (state.unitFailCounts[uuid] or 0) + 1
-									state.stats.lastAction = "place_retry_" .. unitId .. "_" .. tostring(state.unitFailCounts[uuid])
-									if state.unitFailCounts[uuid] >= 4 and not isPriorityKeep then
-										AA.invokeServer("delete_ingame_temporary_unit", slot)
-										state.stats.unitsDeleted += 1
-										state.unitFailCounts[uuid] = 0
-										state.stats.lastAction = "del_unplaceable_" .. unitId
-									end
-								end
-							elseif not isPriorityKeep then
-								AA.invokeServer("delete_ingame_temporary_unit", slot)
-								state.stats.unitsDeleted += 1
-								state.stats.lastAction = "del_nospot_" .. unitId
-							end
-						end
-					end
+		local topSpawn = slotCandidates[1]
+		if topSpawn and money >= topSpawn.cost then
+			local cf, hitPos = findValidPlacementCFrame(
+				AA,
+				topSpawn.uinfo,
+				topSpawn.mode,
+				leakThreat and leakThreat.wpIdx,
+				state.failedPositions,
+				leakThreat and leakThreat.pos,
+				topSpawn.fusionPartnerPos,
+				topSpawn.preferNearHill,
+				primaryCarryAnchorPos,
+				firstErwinPos
+			)
+			if cf and hitPos then
+				local prevCount = #placed.all
+				local prevMoney = money
+				AA.invokeServer("spawn_unit", topSpawn.uuid, cf)
+				local newPlaced = getPlayerPlacedUnits(AA, waypoints)
+				local newMoney = lp._stats.resource.Value
+				if #newPlaced.all > prevCount or newMoney < (prevMoney - 50) then
+					state.stats.unitsSpawned += 1
+					state.stats.lastAction = "spawn_" .. topSpawn.unitId .. "_" .. topSpawn.mode
+					placed = newPlaced
+					money = newMoney
+					leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
+				else
+					table.insert(state.failedPositions, hitPos)
 				end
 			end
 		end
 
 		placed = getPlayerPlacedUnits(AA, waypoints)
 		money = lp._stats.resource.Value
-		leakThreat = analyzeEnemyThreats(waypoints, placed.dps)
+		hasVegito = placed.vegitoEntry ~= nil
+		hasVego = placed.vegoEntry ~= nil
+		hasCarrot = placed.carrotEntry ~= nil
 
-		if placed.airTargetCount >= 1 then
+		if placed.carrotEntry and (hasVego or hasVegito or #placed.dps >= 2) then
+			local cModel = placed.carrotEntry.model
+			if cModel:FindFirstChild("_stats") and cModel._stats:FindFirstChild("priority") and cModel._stats.priority.Value ~= "flying" then
+				AA.invokeServer("change_priority", cModel, "flying")
+			end
+		elseif placed.airTargetCount >= 1 and #placed.dps >= 2 then
 			for _, d in ipairs(placed.dps) do
 				if d.canAir and d.model:FindFirstChild("_stats") and d.model._stats:FindFirstChild("priority") then
-					if d.model._stats.priority.Value ~= "flying" and (placed.airTargetCount >= 2 or wave >= 4) then
+					if d.model._stats.priority.Value ~= "flying" then
 						AA.invokeServer("change_priority", d.model, "flying")
-						break
 					end
+					break
 				end
 			end
 		end
 
-		local isBossPrepWave = BOSS_PREP_WAVES[wave] or (leakThreat ~= nil)
-		local basicFarmDefenseReady = (#placed.dps >= 2 and placed.totalDamage >= math.max(3500, wave * 2000)) or (placed.totalDpsUpgrades >= math.max(2, math.floor(wave * 0.75)))
-		local earlyDefenseReady = (#placed.dps >= 2 and placed.totalDamage >= math.max(5000, wave * 2800)) or (placed.totalDpsUpgrades >= math.max(2, math.floor(wave * 0.9)))
-		local gateReserveReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and wave >= 7 and #placed.dps >= 2 and placed.totalAirDamage >= math.max(20000, wave * 3000)
-		local summonReserveReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and wave >= 10 and #placed.dps >= 3 and placed.totalAirDamage >= math.max(35000, wave * 3800)
-		local spellSaveDefenseReady = (not leakThreat or leakThreat.aheadDpsCount > 0) and #placed.dps >= 2 and placed.totalDamage >= math.max(6000, wave * 2400)
+		local primaryUpgradeCarry = nil
+		local primaryUpgradeScore = -1
+		local primaryAirUpgradeCarry = nil
+		local primaryAirUpgradeScore = -1
+		for _, d in ipairs(placed.dps) do
+			if d.upgrade < d.maxUpgrade then
+				local sc = (d.isUnique and 1000000 or 0) + ((d.traitMult or 1) * 50000) + (d.rarityScore * 100) + d.liveDamage + (d.upgrade * 2500)
+				if sc > primaryUpgradeScore then
+					primaryUpgradeScore = sc
+					primaryUpgradeCarry = d
+				end
+				if d.canAir and sc > primaryAirUpgradeScore then
+					primaryAirUpgradeScore = sc
+					primaryAirUpgradeCarry = d
+				end
+			end
+		end
 
 		local reservedMoney = 0
-		local needMoreMainsNow = canSummonMoreMainUnits(AA, placed)
-		if (not leakThreat or leakThreat.aheadDpsCount > 0) and #placed.dps >= 1 then
-			for i = 1, 6 do
-				local slot = tostring(i)
-				local spellId = ucsc.session.ingame_spells and ucsc.session.ingame_spells[slot]
-				if spellId then
-					local sinfo = IngameSpells and IngameSpells[spellId]
-					local scost = sinfo and sinfo.cost or 0
-					if spellId == "gate" and gateReserveReady and needMoreMainsNow then
-						reservedMoney = math.max(reservedMoney, scost)
-					elseif spellId == "summon" and summonReserveReady and needMoreMainsNow then
-						reservedMoney = math.max(reservedMoney, scost)
-					elseif spellId == "random_buff" and bestDpsTarget and (bestDpsTarget.liveDamage >= 5000 or bestDpsTarget.isMainUnit) and earlyDefenseReady then
-						reservedMoney = math.max(reservedMoney, scost)
-					elseif spellId == "clone" and bestDpsTarget and (bestDpsTarget.upgrade >= 3 or bestDpsTarget.liveDamage >= 25000 or bestDpsTarget.isMainUnit) and spellSaveDefenseReady then
-						reservedMoney = math.max(reservedMoney, scost)
-					end
-				else
-					local uuid, udata = ucsc.get_unit_in_equipped_slot(slot)
-					if uuid and udata and (isMainEquippedUnit(AA, uuid, udata.unit_id) or FUSION_PARTNER_UNITS[udata.unit_id]) then
-						local uinfo = Units[udata.unit_id]
-						if uinfo then
-							local _, _, eqIsUnique = hasEquippedUnitId(AA, udata.unit_id)
-							local unitCap = (FUSION_PARTNER_UNITS[udata.unit_id] or eqIsUnique) and 1 or (tonumber(uinfo.spawn_cap) or 4)
-							if (placed.mainById[udata.unit_id] or 0) < unitCap then
-								local spawnCost = math.ceil((tonumber(uinfo.cost) or 500) * spawnMult)
-								reservedMoney = math.max(reservedMoney, spawnCost)
-							end
-						end
-					end
-				end
-			end
+		if topSpawn and topSpawn.priority >= 820 then
+			reservedMoney = topSpawn.cost
 		end
 
-		local bestMainCarryAnyUpg = nil
-		local bestMainAnyScore = -1
-		local primaryMainCarry = nil
-		local primaryMainScore = -1
-		local primaryAirCarry = nil
-		local primaryAirScore = -1
-		local primaryGroundCarry = nil
-		local primaryGroundScore = -1
-		local primaryAnchorCarry = nil
-		local primaryAnchorScore = -1
-		for _, d in ipairs(placed.dps) do
-			if d.isMainUnit or d.isUnique then
-				local anyScore = (d.isUnique and 10000000 or 0) + (d.isMainUnit and 3000000 or 0) + (d.maxPotentialDps or 0) + d.liveDamage
-				if anyScore > bestMainAnyScore then
-					bestMainAnyScore = anyScore
-					bestMainCarryAnyUpg = d
-				end
-			end
-			if d.upgrade < d.maxUpgrade then
-				if d.isMainUnit or d.isUnique then
-					local mScore = (d.isUnique and 10000000 or 0)
-						+ (d.isMainUnit and 3000000 or 0)
-						+ (d.maxPotentialDps or 0)
-						+ d.liveDamage
-						+ d.upgrade * 25000
-					if mScore > primaryMainScore then
-						primaryMainScore = mScore
-						primaryMainCarry = d
-					end
-				end
-			end
-		end
-		for _, d in ipairs(placed.dps) do
-			if d.upgrade < d.maxUpgrade and d.canAir then
-				local score = (d.isUnique and 5000000 or 0)
-					+ (d.isMainUnit and 1500000 or 0)
-					+ (d.maxPotentialDps or 0) * 0.75
-					+ d.liveDamage * 0.5
-					+ d.rarityScore * 25
-					+ d.upgrade * 1000
-				if score > primaryAirScore then
-					primaryAirScore = score
-					primaryAirCarry = d
-				end
-			end
-		end
-		for _, d in ipairs(placed.dps) do
-			if d.upgrade < d.maxUpgrade and d.rarityScore >= 500 then
-				local isAlreadySelected = (primaryMainCarry and d.model == primaryMainCarry.model)
-					or (primaryAirCarry and d.model == primaryAirCarry.model)
-				if not isAlreadySelected then
-					local score = (d.isUnique and 5000000 or 0)
-						+ (d.isMainUnit and 1500000 or 0)
-						+ (d.maxPotentialDps or 0) * 0.75
-						+ d.liveDamage * 0.5
-						+ d.rarityScore * 25
-						+ d.upgrade * 1000
-					if score > primaryGroundScore then
-						primaryGroundScore = score
-						primaryGroundCarry = d
-					end
-				end
-			end
-		end
-		for _, d in ipairs(placed.dps) do
-			if d.upgrade < d.maxUpgrade and d.rarityScore >= 500 and (d.prog or 0) >= 0.52 then
-				local isAlreadySelected = (primaryMainCarry and d.model == primaryMainCarry.model)
-					or (primaryAirCarry and d.model == primaryAirCarry.model)
-					or (primaryGroundCarry and d.model == primaryGroundCarry.model)
-				if not isAlreadySelected then
-					local score = (d.isUnique and 5000000 or 0)
-						+ (d.isMainUnit and 1500000 or 0)
-						+ (d.maxPotentialDps or 0) * 0.75
-						+ d.liveDamage * 0.5
-						+ d.rarityScore * 25
-						+ d.upgrade * 1000
-					if score > primaryAnchorScore then
-						primaryAnchorScore = score
-						primaryAnchorCarry = d
-					end
-				end
-			end
-		end
-
-		local airDamageTarget = (wave <= 8 and (wave * 3500)) or (wave <= 14 and (wave * 8000)) or (wave * 16500)
-		local needMoreAirNow = (placed.totalAirDamage < airDamageTarget) or (wave >= 14 and placed.totalAirDamage < placed.totalDamage * 0.35)
-		local hasGokuForFusion = (placed.byId["goku_ssj3_evolved"] or 0) > 0 or (placed.byId["goku_ssj3"] or 0) > 0
 		local upgradeQueue = {}
 		for _, entry in ipairs(placed.all) do
 			local nextCost = getNextUpgradeCost(AA, entry)
-			if nextCost then
+			if nextCost and entry.upgrade < entry.maxUpgrade then
 				local priority = 0
 
-				local refMain = primaryMainCarry or bestMainCarryAnyUpg
-				local isInferiorDuplicateOfMain = refMain
-					and entry.id == refMain.id
-					and entry.model ~= refMain.model
-					and not entry.isUnique
-					and (entry.maxPotentialDps or 0) < (refMain.maxPotentialDps or 0) * 0.85
-
-				local leakPriorityBoost = 0
-				if leakThreat and not entry.isFarm and not entry.isSupport and entry.pos and (not leakThreat.isFlying or entry.canAir) then
-					local dist = (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(leakThreat.pos.X, 0, leakThreat.pos.Z)).Magnitude
-					if dist <= (entry.liveRange + 6) then
-						if (entry.wpIdx or 1) >= (leakThreat.wpIdx - 2) then
-							leakPriorityBoost = 1580 + math.min(350, entry.liveDamage / 250)
-						else
-							leakPriorityBoost = 1360 + math.min(250, entry.liveDamage / 350)
-						end
-					elseif (entry.wpIdx or 1) >= leakThreat.wpIdx and #waypoints > 0 then
-						for k = leakThreat.wpIdx, math.min(#waypoints, leakThreat.wpIdx + 6) do
-							local wp = waypoints[k]
-							if (Vector3.new(entry.pos.X, 0, entry.pos.Z) - Vector3.new(wp.X, 0, wp.Z)).Magnitude <= (entry.liveRange + 6) then
-								leakPriorityBoost = 1480 + math.min(300, entry.liveDamage / 250)
-								break
-							end
-						end
-					end
-				end
-
-				if leakPriorityBoost > 0 then
-					if primaryMainCarry and entry.model == primaryMainCarry.model then
-						priority = 1850 - entry.upgrade * 4
+				if entry.id == "speedwagon" and (hasVego or #placed.dps >= 1) and wave <= 20 then
+					priority = 1350 - (nextCost / 200)
+				elseif entry.isFarm and (#placed.dps >= 1) and wave <= 20 and nextCost <= 3500 then
+					priority = 1340 - (nextCost / 200)
+				elseif entry.isIdol and entry.upgrade < 3 and nextCost <= 3500 then
+					priority = 1310 - entry.upgrade * 15
+				elseif deckHasFusionPair and not hasVegito and VEGO_UNITS[entry.id] and entry.upgrade < 7 then
+					priority = 1280 - entry.upgrade * 5
+				elseif deckHasFusionPair and not hasVegito and CARROT_UNITS[entry.id] and entry.upgrade < 7 then
+					local vegoUpg = (placed.vegoEntry and placed.vegoEntry.upgrade) or 0
+					if vegoUpg >= 7 or entry.upgrade <= vegoUpg then
+						priority = 1275 - entry.upgrade * 5
 					else
-						priority = leakPriorityBoost
+						priority = 1240 - entry.upgrade * 5
 					end
-				elseif isInferiorDuplicateOfMain then
-					priority = 0
-				elseif FUSION_PARTNER_UNITS[entry.id] and entry.upgrade < 7 and bestMainCarryAnyUpg and bestMainCarryAnyUpg.upgrade >= 7 then
-					priority = 1265 - entry.upgrade * 4
-				elseif primaryMainCarry and entry.model == primaryMainCarry.model and ((entry.isUnique and entry.upgrade < 3 and nextCost <= 6000) or (entry.isUnique and placed.totalAirDamage >= math.max(35000, wave * 3800)) or (entry.isUnique and entry.canAir) or hasGokuForFusion) then
-					priority = 1245 - entry.upgrade * 4
-				elseif entry.isFarm and wave <= 14 and not leakThreat and basicFarmDefenseReady and ((entry.id == "speedwagon" and nextCost <= 3000) or nextCost <= 2500) then
-					priority = 1215 - nextCost / 250
-				elseif needMoreAirNow and primaryAirCarry and entry.model == primaryAirCarry.model then
-					priority = 1190 - entry.upgrade * 4
-				elseif primaryMainCarry and entry.model == primaryMainCarry.model then
-					priority = 1150
-				elseif entry.isIdol and earlyDefenseReady and not leakThreat then
-					priority = 1130 - entry.upgrade * 15
-				elseif entry.isFarm and wave <= 18 and not isBossPrepWave then
-					if basicFarmDefenseReady and nextCost <= 4500 then
-						priority = 1110 - nextCost / 200
-					elseif earlyDefenseReady and wave <= 15 and nextCost <= 7500 then
-						priority = 1094 - nextCost / 250
-					elseif earlyDefenseReady and wave <= 16 and nextCost <= 10000 then
-						priority = 980 - nextCost / 200
-					else
-						priority = 350 - nextCost / 200
-					end
-				elseif primaryAirCarry and entry.model == primaryAirCarry.model and (entry.rarityScore >= 500 or entry.upgrade < 3) then
-					priority = 1098 - entry.upgrade * 4
-				elseif primaryGroundCarry and entry.model == primaryGroundCarry.model then
-					priority = 1090 - entry.upgrade * 4
-				elseif primaryAnchorCarry and entry.model == primaryAnchorCarry.model and entry.upgrade < 6 then
-					priority = 1084 - entry.upgrade * 4
-				elseif entry.rarityScore >= 500 and entry.upgrade < 2 and nextCost <= 2200 and #placed.dps <= 6 and not entry.isFarm and not entry.isSupport then
-					priority = 1078 - entry.upgrade * 10
-				elseif entry.canAirPotential and not entry.canAir and entry.rarityScore >= 500 and not entry.isFarm and not entry.isSupport then
-					priority = 1075 - entry.upgrade * 4
-				elseif entry.canAir and entry.rarityScore >= 500 and entry.upgrade < 5 and not entry.isFarm and not entry.isSupport then
-					priority = 1055 - entry.upgrade * 10
-				elseif (entry.isMainUnit or entry.isUnique) and not entry.isFarm and not entry.isSupport then
-					priority = 1035 - entry.upgrade * 4
-				elseif not entry.isFarm and not entry.isSupport then
-					if entry.canAir and entry.upgrade < 3 and nextCost <= 5500 then
-						priority = 992 - entry.upgrade * 8
-					elseif entry.rarityScore >= 500 and entry.upgrade < 4 then
-						priority = 975 - entry.upgrade * 12
-					else
-						priority = entry.rarityScore + (entry.liveDamage / 500) + (entry.canAir and 80 or 0) - entry.upgrade * 10
-					end
-				elseif entry.isSupport and wave >= 12 then
-					priority = 450 - entry.upgrade * 30
+				elseif entry.id == "vegito" then
+					priority = 1400 - entry.upgrade * 4
+				elseif entry.isFarm and (#placed.dps >= 1) and wave <= 18 and nextCost <= 8500 and (placed.totalDamage >= wave * 1800 or hasVegito) then
+					priority = 1225 - (nextCost / 250)
+				elseif not deckHasFusionPair and primaryUpgradeCarry and entry.model == primaryUpgradeCarry.model then
+					priority = 1290 - entry.upgrade * 4
+				elseif not deckHasFusionPair and primaryAirUpgradeCarry and entry.model == primaryAirUpgradeCarry.model and entry.upgrade < 5 then
+					priority = 1250 - entry.upgrade * 5
+				elseif TIMESTOP_UNITS[entry.id] and entry.upgrade < 7 and (hasVegito or (placed.vegoEntry and placed.vegoEntry.upgrade >= 5) or (not deckHasFusionPair and #placed.dps >= 1)) then
+					priority = 1210 - entry.upgrade * 6
+				elseif (entry.id == "erwin" or entry.id == "erwin_school" or entry.id == "erwin_halloween") and (hasVegito or (placed.vegoEntry and placed.vegoEntry.upgrade >= 6) or (not deckHasFusionPair and #placed.dps >= 1)) then
+					priority = 1190 - entry.upgrade * 12
+				elseif entry.isIdol then
+					priority = 1170 - entry.upgrade * 10
+				elseif entry.isSupport then
+					priority = 1150 - entry.upgrade * 12
+				elseif CARROT_UNITS[entry.id] or VEGO_UNITS[entry.id] then
+					priority = 1140 - entry.upgrade * 8
+				else
+					priority = 1000 + (entry.isUnique and 80 or 0) + math.min(60, entry.rarityScore / 10) - entry.upgrade * 10
 				end
 
 				if priority > 0 then
@@ -2353,30 +2022,20 @@ local function attachToAnimeAdventures(AA)
 		end
 
 		table.sort(upgradeQueue, function(a, b)
-			if math.abs(a.priority - b.priority) > 12 then
+			if math.abs(a.priority - b.priority) > 10 then
 				return a.priority > b.priority
 			end
 			return a.cost < b.cost
 		end)
 
 		local availableForUpgrades = math.max(0, money - reservedMoney)
-		local isCriticalLeak = leakThreat and (leakThreat.prog >= 0.72 or leakThreat.aheadDpsCount == 0)
-		for _, item in ipairs(upgradeQueue) do
-			local budget = (item.priority >= 1450 and isCriticalLeak) and money or availableForUpgrades
-			if budget >= item.cost then
-				local ok = AA.invokeServer("upgrade_unit_ingame", item.entry.model)
+		local topUpgrade = upgradeQueue[1]
+		if topUpgrade then
+			if availableForUpgrades >= topUpgrade.cost then
+				local ok = AA.invokeServer("upgrade_unit_ingame", topUpgrade.entry.model)
 				if ok then
 					state.stats.unitsUpgraded += 1
-					state.stats.lastAction = "upg_" .. item.entry.id .. "_to_" .. tostring(item.entry.upgrade + 1)
-					money = lp._stats.resource.Value
-					availableForUpgrades = math.max(0, money - reservedMoney)
-				end
-			elseif not leakThreat then
-				local isMainOrUniqueItem = item.entry.isUnique or item.entry.isMainUnit or FUSION_PARTNER_UNITS[item.entry.id]
-				if (isMainOrUniqueItem and item.priority >= 1140 and item.cost <= 35000)
-					or (item.priority >= 1080 and item.entry.upgrade < 5 and item.cost <= 9500)
-					or (item.priority >= 1050 and item.cost <= 14000 and availableForUpgrades >= (item.cost * 0.30)) then
-					break
+					state.stats.lastAction = "upg_" .. topUpgrade.entry.id .. "_to_" .. tostring(topUpgrade.entry.upgrade + 1)
 				end
 			end
 		end
@@ -2384,17 +2043,17 @@ local function attachToAnimeAdventures(AA)
 		return "active_wave_" .. tostring(wave)
 	end
 
-	function AA.startAutoAprilFools()
-		if AA.AutoAprilFools.running then
+	function AA.startAutoSummerEvent()
+		if AA.AutoSummerEvent.running then
 			return "already_running"
 		end
-		AA.AutoAprilFools.running = true
+		AA.AutoSummerEvent.running = true
 
 		task.spawn(function()
-			while AA.AutoAprilFools and AA.AutoAprilFools.running do
-				local ok, err = pcall(AA.stepAprilFools)
+			while AA.AutoSummerEvent and AA.AutoSummerEvent.running do
+				local ok, err = pcall(AA.stepSummerEvent)
 				if not ok then
-					AA.AutoAprilFools.stats.lastError = tostring(err)
+					AA.AutoSummerEvent.stats.lastError = tostring(err)
 				end
 				task.wait(0.8)
 			end
@@ -2402,12 +2061,15 @@ local function attachToAnimeAdventures(AA)
 		return "started"
 	end
 
-	function AA.stopAutoAprilFools()
-		if AA.AutoAprilFools then
-			AA.AutoAprilFools.running = false
+	function AA.stopAutoSummerEvent()
+		if AA.AutoSummerEvent then
+			AA.AutoSummerEvent.running = false
 		end
 		return "stopped"
 	end
+
+	AA.startAutoAprilFools = AA.startAutoSummerEvent
+	AA.stopAutoAprilFools = AA.stopAutoSummerEvent
 end
 
 attachToAnimeAdventures(AnimeAdventures)
@@ -2417,8 +2079,8 @@ task.spawn(function()
 		game.Loaded:Wait()
 	end
 	local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
-	if lp and (not ALLOWED_APRIL_FOOLS_USERNAME or lp.Name == ALLOWED_APRIL_FOOLS_USERNAME) then
+	if lp and (not ALLOWED_SUMMER_USERNAME or lp.Name == ALLOWED_SUMMER_USERNAME) then
 		task.wait(2)
-		AnimeAdventures.startAutoAprilFools()
+		AnimeAdventures.startAutoSummerEvent()
 	end
 end)
