@@ -173,7 +173,7 @@ local DEFAULT_CONFIG = {
 	USE_MATCHMAKING = true,
 	ALWAYS_PICK_DEBUFFS = true,
 	PERFECT_ERWIN_BUFF = true,
-	TARGET_ERWIN_COUNT = 3,
+	TARGET_ERWIN_COUNT = 4,
 	SMART_TIMESTOP = true,
 	RETURN_TO_LOBBY = true,
 }
@@ -774,7 +774,11 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 		local anchorPts = {}
 		if mode == "buffer" and bufferAnchorPos then
 			table.insert(anchorPts, bufferAnchorPos)
-			if firstErwinPos then
+			if type(firstErwinPos) == "table" then
+				for _, ep in ipairs(firstErwinPos) do
+					table.insert(anchorPts, ep)
+				end
+			elseif typeof(firstErwinPos) == "Vector3" then
 				table.insert(anchorPts, firstErwinPos)
 			end
 		elseif fusionPartnerPos then
@@ -846,13 +850,27 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 						elseif mode == "buffer" and bufferAnchorPos then
 
 							local distCarry = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(bufferAnchorPos.X, 0, bufferAnchorPos.Z)).Magnitude
-							if distCarry > 14.0 or distCarry < 2.8 then
+							if distCarry > 14.0 or distCarry < 2.6 then
 								allowSpot = false
 							else
 								local dPath = minFrontDistanceAllLanes(pt)
-
 								sortKey = 2000 - (distCarry * 35) - math.abs(dPath - 8.5) * 15
-								if firstErwinPos then
+								if type(firstErwinPos) == "table" and #firstErwinPos > 0 then
+									local maxErwinDist = 0
+									local sumErwinDist = 0
+									for _, ep in ipairs(firstErwinPos) do
+										local de = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(ep.X, 0, ep.Z)).Magnitude
+										if de > maxErwinDist then
+											maxErwinDist = de
+										end
+										sumErwinDist += de
+									end
+									if maxErwinDist <= 13.5 then
+										sortKey += (2500 - maxErwinDist * 55 - sumErwinDist * 15)
+									else
+										sortKey -= maxErwinDist * 140
+									end
+								elseif typeof(firstErwinPos) == "Vector3" then
 									local distErwin = (Vector3.new(pt.X, 0, pt.Z) - Vector3.new(firstErwinPos.X, 0, firstErwinPos.Z)).Magnitude
 									if distErwin <= 13.5 then
 										sortKey += (1500 - distErwin * 40)
@@ -1607,52 +1625,14 @@ local function attachToAnimeAdventures(AA)
 			state.fusionTryCount = 0
 		end
 
-		if #placed.erwins > 0 then
-			local numErwins = #placed.erwins
-			local staggerInterval = 19.5
-			if numErwins >= 4 then
-				staggerInterval = 15.2
-			elseif numErwins == 2 then
-				staggerInterval = 29.0
-			elseif numErwins == 1 then
-				staggerInterval = 30.0
-			end
-
-			if (tick() - (state.lastErwinBuffCast or 0)) >= staggerInterval then
-				local bestErwin = nil
-				local oldestCast = math.huge
-				for _, erw in ipairs(placed.erwins) do
-					local u = erw.model
-					local st = u:FindFirstChild("_stats")
-					local cd = st and st:FindFirstChild("active_attack_cooldown") and st.active_attack_cooldown.Value or 60
-					local lastCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
-					local queued = st and st:FindFirstChild("active_queued_or_using") and st.active_queued_or_using.Value or false
-					if not queued and (cd - (tick() - lastCast)) <= 0 then
-						if lastCast < oldestCast then
-							oldestCast = lastCast
-							bestErwin = erw
-						end
-					end
-				end
-
-				if bestErwin then
-					local castOk = pcall(function()
-						AA.invokeServer("use_active_attack", bestErwin.model)
-					end)
-					if castOk then
-						state.lastErwinBuffCast = tick()
-						state.stats.activesUsed += 1
-						state.stats.erwinBuffsCast += 1
-						state.stats.lastAction = string.format("perfect_erwin_buff_%d_of_%d", (state.stats.erwinBuffsCast % numErwins) + 1, numErwins)
-					end
-				end
-			end
+		if cfg.PERFECT_ERWIN_BUFF ~= false and AA.stepPerfectErwinBuff then
+			pcall(AA.stepPerfectErwinBuff)
 		end
 
 		for _, entry in ipairs(placed.all) do
 			local u = entry.model
 			local activeId = usc.get_active_id and usc.get_active_id(u)
-			if activeId and activeId ~= "vegito_fusion" and activeId ~= "vegito_fusion_vegeta" and activeId ~= "erwin:buff_units" and activeId ~= "himeno:final" then
+			if activeId and not REPOSITION_ACTIVE_UNITS[entry.id] and activeId ~= "vegito_fusion" and activeId ~= "vegito_fusion_vegeta" and activeId ~= "erwin:buff_units" and activeId ~= "himeno:final" then
 				local st = u:FindFirstChild("_stats")
 				local cd = st and st:FindFirstChild("active_attack_cooldown") and st.active_attack_cooldown.Value or 0
 				local lastCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
@@ -1714,7 +1694,13 @@ local function attachToAnimeAdventures(AA)
 			or (bestPlacedCarry and bestPlacedCarry.pos)
 			or (placed.carrotEntry and placed.carrotEntry.pos)
 			or (placed.homuraEntry and placed.homuraEntry.pos)
-		local firstErwinPos = (#placed.erwins > 0 and placed.erwins[1].pos) or nil
+		local erwinPositions = {}
+		for _, erw in ipairs(placed.erwins) do
+			if erw.pos then
+				table.insert(erwinPositions, erw.pos)
+			end
+		end
+		local firstErwinPos = (#erwinPositions > 0 and erwinPositions) or nil
 
 		local hasVegito = placed.vegitoEntry ~= nil
 		local hasVego = placed.vegoEntry ~= nil
@@ -1724,7 +1710,7 @@ local function attachToAnimeAdventures(AA)
 		local speedwagonCount = placed.byId["speedwagon"] or 0
 		local myErwinCount = #placed.erwins
 		local globalErwinCount = getGlobalUnitCountById("erwin")
-		local targetErwins = math.min(cfg.TARGET_ERWIN_COUNT or 3, 6 - math.max(0, globalErwinCount - myErwinCount))
+		local targetErwins = math.min(cfg.TARGET_ERWIN_COUNT or 4, 6 - math.max(0, globalErwinCount - myErwinCount))
 
 		local deckHasVego = false
 		local deckHasCarrot = false
@@ -1850,7 +1836,7 @@ local function attachToAnimeAdventures(AA)
 				elseif unitId == "erwin" or unitId == "erwin_school" or unitId == "erwin_halloween" then
 					placementMode = primaryCarryAnchorPos and "buffer" or "front"
 					if myErwinCount < targetErwins and globalErwinCount < 6 and hasFrontCarryPlaced and (hasAirCarryPlaced or wave >= 3) and (totalFarmsPlaced >= 3 or wave >= 4) then
-						spawnPriority = 750 - myErwinCount * 15
+						spawnPriority = 825 - myErwinCount * 2
 					end
 				elseif ds.isSupport then
 					placementMode = primaryCarryAnchorPos and "buffer" or "front"
@@ -2043,11 +2029,260 @@ local function attachToAnimeAdventures(AA)
 		return "active_wave_" .. tostring(wave)
 	end
 
+	local function getUnitPhysBuff(u)
+		if not u or not u.Parent then
+			return 0
+		end
+		local b = u:FindFirstChild("_buffs")
+		local p = b and b:FindFirstChild("damage_buff__physical")
+		return (p and p.Value) or 0
+	end
+
+	local function isErwinReadyToCast(u)
+		if not u or not u.Parent then
+			return false
+		end
+		local st = u:FindFirstChild("_stats")
+		if not st then
+			return false
+		end
+		local cd = st:FindFirstChild("active_attack_cooldown") and st.active_attack_cooldown.Value or 60
+		local lastCast = st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
+		local queued = st:FindFirstChild("active_queued_or_using") and st.active_queued_or_using.Value or false
+		return (not queued) and ((cd - (tick() - lastCast)) <= 0)
+	end
+
+	local function tryCastErwin(u)
+		if not isErwinReadyToCast(u) then
+			return false
+		end
+		local st = u:FindFirstChild("_stats")
+		local beforeCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
+		local ok, res = pcall(function()
+			return AA.invokeServer("use_active_attack", u)
+		end)
+		local afterCast = st and st:FindFirstChild("last_active_cast") and st.last_active_cast.Value or 0
+		if afterCast > beforeCast or (ok and res == true) then
+			return true
+		end
+		return false
+	end
+
+	function AA.stepPerfectErwinBuff()
+		local state = AA.AutoSummerEvent
+		if not state or game.PlaceId == LOBBY_PLACE_ID then
+			return
+		end
+		local cfg = getConfig()
+		if cfg.PERFECT_ERWIN_BUFF == false then
+			return
+		end
+		local lp = Players.LocalPlayer
+		local unitsFolder = workspace:FindFirstChild("_UNITS")
+		if not lp or not unitsFolder then
+			return
+		end
+
+		state.erwinOrder = state.erwinOrder or {}
+		local validMap = {}
+		local currentErwins = {}
+		local carryUnit = nil
+
+		for _, u in ipairs(unitsFolder:GetChildren()) do
+			local st = u:FindFirstChild("_stats")
+			if st and st:FindFirstChild("player") and st.player.Value == lp then
+				local stateVal = st:FindFirstChild("state") and st.state.Value or "idle"
+				if stateVal ~= "destroyed" then
+					local id = st:FindFirstChild("id") and st.id.Value or u.Name
+					if id == "erwin" or id == "erwin_school" or id == "erwin_halloween" then
+						if st:FindFirstChild("_auto_active") and st._auto_active.Value == true then
+							st._auto_active.Value = false
+						end
+						validMap[u] = true
+						table.insert(currentErwins, u)
+					elseif id == "vegito" then
+						carryUnit = u
+					elseif not carryUnit and (VEGO_UNITS[id] or CARROT_UNITS[id]) then
+						carryUnit = u
+					end
+				end
+			end
+		end
+
+		local keptOrder = {}
+		local inKept = {}
+		for _, u in ipairs(state.erwinOrder) do
+			if validMap[u] and not inKept[u] then
+				table.insert(keptOrder, u)
+				inKept[u] = true
+			end
+		end
+		for _, u in ipairs(currentErwins) do
+			if not inKept[u] then
+				table.insert(keptOrder, u)
+				inKept[u] = true
+			end
+		end
+		state.erwinOrder = keptOrder
+
+		local n = #keptOrder
+		local requiredErwins = math.min(cfg.TARGET_ERWIN_COUNT or 4, 4)
+		local globalErwins = getGlobalUnitCountById("erwin")
+		local maxPossibleForMe = math.min(requiredErwins, 6 - math.max(0, globalErwins - n))
+
+		if n < math.max(1, maxPossibleForMe) then
+			state.erwinStage = 0
+			return
+		end
+
+		if n < 4 then
+			local watchUnit = carryUnit or keptOrder[1]
+			if getUnitPhysBuff(watchUnit) == 0 and (tick() - (state.lastErwinBuffCast or 0)) >= 1.5 then
+				for _, u in ipairs(keptOrder) do
+					if tryCastErwin(u) then
+						state.lastErwinBuffCast = tick()
+						state.stats.activesUsed += 1
+						state.stats.erwinBuffsCast += 1
+						state.stats.lastAction = "erwin_fallback_buff"
+						break
+					end
+				end
+			end
+			return
+		end
+
+		local E1, E2, E3, E4 = keptOrder[1], keptOrder[2], keptOrder[3], keptOrder[4]
+		local b1 = getUnitPhysBuff(E1)
+		local b2 = getUnitPhysBuff(E2)
+		local b3 = getUnitPhysBuff(E3)
+		local b4 = getUnitPhysBuff(E4)
+		local now = tick()
+		local stage = state.erwinStage or 0
+		local elapsed = now - (state.erwinStageTime or 0)
+
+		if stage == 0 or (stage >= 3 and elapsed > 8.0 and b1 == 0 and b2 == 0 and b3 == 0 and b4 == 0) then
+			stage = 1
+			state.erwinStage = 1
+		end
+
+		if stage == 1 then
+			if b2 == 0 and b3 == 0 and b4 == 0 then
+				if tryCastErwin(E1) then
+					state.erwinStage = 2
+					state.erwinStageTime = now
+					state.erwinSawPairABuff = (getUnitPhysBuff(E2) > 0 or getUnitPhysBuff(E3) > 0 or getUnitPhysBuff(E4) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_step1_first_buff"
+				end
+			end
+		elseif stage == 2 then
+			if b2 > 0 or b3 > 0 or b4 > 0 then
+				state.erwinSawPairABuff = true
+			end
+			if elapsed >= 4.5 then
+				if tryCastErwin(E2) then
+					state.erwinStage = 3
+					state.erwinStageTime = now
+					state.erwinSawPairBBuff = (getUnitPhysBuff(E1) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_step2_second_buff_56pct"
+				end
+			end
+		elseif stage == 3 then
+			if b1 > 0 then
+				state.erwinSawPairBBuff = true
+			end
+			if b2 > 0 or b3 > 0 or b4 > 0 then
+				state.erwinSawPairABuff = true
+			end
+			local buff25Expired = (state.erwinSawPairABuff and b2 == 0 and b4 == 0) or (elapsed >= 16.5 and b2 == 0 and b4 == 0)
+			if buff25Expired then
+				if tryCastErwin(E3) then
+					state.erwinStage = 4
+					state.erwinStageTime = now
+					state.erwinSawPairABuff = (getUnitPhysBuff(E2) > 0 or getUnitPhysBuff(E4) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_step3_third_buff_100pct"
+				end
+			end
+		elseif stage == 4 then
+			if b2 > 0 or b4 > 0 then
+				state.erwinSawPairABuff = true
+			end
+			if b1 > 0 or b3 > 0 then
+				state.erwinSawPairBBuff = true
+			end
+			local buff56Expired = (state.erwinSawPairBBuff and b1 == 0 and b3 == 0) or (elapsed >= 2.0 and b1 == 0 and b3 == 0)
+			if buff56Expired then
+				if tryCastErwin(E4) then
+					state.erwinStage = 5
+					state.erwinStageTime = now
+					state.erwinSawPairBBuff = (getUnitPhysBuff(E1) > 0 or getUnitPhysBuff(E3) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_step4_fourth_buff_loop"
+				end
+			end
+		elseif stage == 5 then
+			if b1 > 0 or b3 > 0 then
+				state.erwinSawPairBBuff = true
+			end
+			if b2 > 0 or b4 > 0 then
+				state.erwinSawPairABuff = true
+			end
+			local pairAExpired = (state.erwinSawPairABuff and b2 == 0 and b4 == 0) or (elapsed >= 2.0 and b2 == 0 and b4 == 0)
+			if pairAExpired then
+				if tryCastErwin(E1) then
+					state.erwinStage = 6
+					state.erwinStageTime = now
+					state.erwinSawPairABuff = (getUnitPhysBuff(E2) > 0 or getUnitPhysBuff(E4) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_loop_cast_E1_100pct"
+				end
+			end
+		elseif stage == 6 then
+			if b2 > 0 or b4 > 0 then
+				state.erwinSawPairABuff = true
+			end
+			if b1 > 0 or b3 > 0 then
+				state.erwinSawPairBBuff = true
+			end
+			local pairBExpired = (state.erwinSawPairBBuff and b1 == 0 and b3 == 0) or (elapsed >= 2.0 and b1 == 0 and b3 == 0)
+			if pairBExpired then
+				if tryCastErwin(E2) then
+					state.erwinStage = 3
+					state.erwinStageTime = now
+					state.erwinSawPairBBuff = (getUnitPhysBuff(E1) > 0 or getUnitPhysBuff(E3) > 0)
+					state.lastErwinBuffCast = now
+					state.stats.activesUsed += 1
+					state.stats.erwinBuffsCast += 1
+					state.stats.lastAction = "erwin_loop_cast_E2_100pct"
+				end
+			end
+		end
+	end
+
 	function AA.startAutoSummerEvent()
 		if AA.AutoSummerEvent.running then
 			return "already_running"
 		end
 		AA.AutoSummerEvent.running = true
+
+		task.spawn(function()
+			while AA.AutoSummerEvent and AA.AutoSummerEvent.running do
+				pcall(AA.stepPerfectErwinBuff)
+				task.wait(0.12)
+			end
+		end)
 
 		task.spawn(function()
 			while AA.AutoSummerEvent and AA.AutoSummerEvent.running do
