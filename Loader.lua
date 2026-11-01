@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local byPlace = {
     [109406948015795] = "RLCrateSimulator.lua",
+    [3351674303] = "DrivingEmpire.lua",
     [8304191830] = "AnimeAdventures.lua",
     [14229839966] = "AnimeAdventures.lua",
     [14229762361] = "AnimeAdventures.lua",
@@ -19,6 +20,7 @@ local byPlace = {
 
 local byGame = {
     [10768851831] = "RLCrateSimulator.lua",
+    [1202096104] = "DrivingEmpire.lua",
     [3183403065] = "AnimeAdventures.lua",
     [1516533665] = "Piggy.lua",
     [4124001390] = "BridgeDuels.lua",
