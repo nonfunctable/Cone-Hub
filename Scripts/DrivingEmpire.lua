@@ -5,16 +5,41 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
 
+local setIdentity = setthreadidentity or setidentity or setthreadcontext
+local function restoreIdentity()
+    if setIdentity then
+        pcall(setIdentity, 8)
+    end
+end
+restoreIdentity()
+
+local env = (getgenv and getgenv()) or shared
+if env.__DrivingEmpireCleanup then
+    pcall(env.__DrivingEmpireCleanup)
+    restoreIdentity()
+end
+pcall(function()
+    if gethui then
+        for _, g in ipairs(gethui():GetChildren()) do
+            if g.Name == "ConeHub_Fluent" then
+                g:Destroy()
+            end
+        end
+    end
+end)
+
 local plr = Players.LocalPlayer
 local delivery = require(ReplicatedStorage.Modules.Client.Jobs.Tasks.DeliveryJobTask)
 local deliveryUtil = require(ReplicatedStorage.Modules.Shared.Jobs.Delivery.DeliveryUtil)
 local vehicles = require(ReplicatedStorage.Modules.Client.Vehicles.VehicleController)
 local vehicleUtil = require(ReplicatedStorage.Modules.Shared.Vehicles.VehicleUtil)
 local tpGuard = require(ReplicatedStorage.Modules.Client.Exploit.VehicleTeleportDetectionController)
+restoreIdentity()
 
-local env = (getgenv and getgenv()) or shared
-if env.__DrivingEmpireCleanup then
-    pcall(env.__DrivingEmpireCleanup)
+local function getPlayerCar()
+    local ok, car = pcall(vehicleUtil.getPlayerData, plr)
+    restoreIdentity()
+    return ok and car or nil
 end
 
 local function loadRemoteModule(primaryUrl, fallbackUrl)
@@ -68,23 +93,29 @@ end
 
 local saved = loadSavedSettings()
 
-local running = true
-local ready = false
-local autoDelivery = (saved.autoDelivery == true)
-local deliveryMode = (saved.deliveryMode == "Safe" or saved.deliveryMode == "HighRisk") and saved.deliveryMode or "HighRisk"
-local dropDelay = math.clamp(tonumber(saved.dropDelay) or 4.5, 1, 10)
-local antiAfk = (saved.antiAfk ~= false)
-
-local hover = nil
-local curTarget, curLoc, curPhase, lastTick, lastFire, dropAt = nil, nil, nil, nil, nil, nil
-local statusText = autoDelivery and "Starting..." or "Idle"
-local deliveriesDone = 0
-local sessionStart = os.clock()
-local startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0
-local conns = {}
+local State = {
+    running = true,
+    ready = false,
+    autoDelivery = (saved.autoDelivery == true),
+    deliveryMode = (saved.deliveryMode == "Safe" or saved.deliveryMode == "HighRisk") and saved.deliveryMode or "HighRisk",
+    dropDelay = math.clamp(tonumber(saved.dropDelay) or 4.5, 1, 10),
+    antiAfk = (saved.antiAfk ~= false),
+    hover = nil,
+    curTarget = nil,
+    curLoc = nil,
+    curPhase = nil,
+    lastTick = nil,
+    lastFire = nil,
+    dropAt = nil,
+    statusText = (saved.autoDelivery == true) and "Starting..." or "Idle",
+    deliveriesDone = 0,
+    sessionStart = os.clock(),
+    startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0,
+    conns = {},
+}
 
 local function saveCurrentSettings()
-    if not ready then
+    if not State.ready then
         return
     end
     if writefile and makefolder and isfolder then
@@ -93,10 +124,10 @@ local function saveCurrentSettings()
                 makefolder("ConeHub")
             end
             writefile(settingsPath, HttpService:JSONEncode({
-                autoDelivery = autoDelivery,
-                deliveryMode = deliveryMode,
-                dropDelay = dropDelay,
-                antiAfk = antiAfk,
+                autoDelivery = State.autoDelivery,
+                deliveryMode = State.deliveryMode,
+                dropDelay = State.dropDelay,
+                antiAfk = State.antiAfk,
             }))
         end)
     end
@@ -111,11 +142,11 @@ if getconnections then
 end
 
 local function clearHover()
-    if hover then
+    if State.hover then
         pcall(function()
-            hover:Destroy()
+            State.hover:Destroy()
         end)
-        hover = nil
+        State.hover = nil
     end
 end
 
@@ -142,8 +173,9 @@ local function tp(cf)
         return
     end
 
-    local car = vehicleUtil.getPlayerData(plr)
+    local car = getPlayerCar()
     local chassis = vehicles.getActiveChassisController()
+    restoreIdentity()
 
     if car and car.Model and car.WeightPart then
         if chassis then
@@ -156,10 +188,11 @@ local function tp(cf)
         car.WeightPart.Anchored = false
         clearHover()
 
-        hover = Instance.new("BodyVelocity")
-        hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-        hover.Velocity = Vector3.zero
-        hover.Parent = car.WeightPart
+        local h = Instance.new("BodyVelocity")
+        h.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        h.Velocity = Vector3.zero
+        h.Parent = car.WeightPart
+        State.hover = h
 
         for _, v in ipairs(car.Model:GetDescendants()) do
             if v:IsA("BasePart") then
@@ -180,10 +213,11 @@ local function tp(cf)
         if hrp then
             clearHover()
 
-            hover = Instance.new("BodyVelocity")
-            hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-            hover.Velocity = Vector3.zero
-            hover.Parent = hrp
+            local h = Instance.new("BodyVelocity")
+            h.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            h.Velocity = Vector3.zero
+            h.Parent = hrp
+            State.hover = h
 
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
@@ -193,7 +227,7 @@ end
 
 local function formatNumber(n)
     local s = tostring(math.floor(tonumber(n) or 0))
-    return s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
 end
 
 local function formatDuration(sec)
@@ -238,27 +272,27 @@ local HomeSessionBox = Tabs.Home:AddParagraph({
 local AfkToggle = Tabs.Home:AddToggle("AntiAfk", {
     Title = "Anti AFK",
     Description = "Prevents idle disconnect while farming",
-    Default = antiAfk,
+    Default = State.antiAfk,
 })
 
 Tabs.Home:AddButton({
     Title = "Reset Session Cash & Timer",
     Description = "Resets session cash earned, hourly rate, and elapsed timer",
     Callback = function()
-        sessionStart = os.clock()
-        deliveriesDone = 0
-        startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0
+        State.sessionStart = os.clock()
+        State.deliveriesDone = 0
+        State.startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0
     end,
 })
 
 local InfoBox = Tabs.Jobs:AddParagraph({
     Title = "Delivery Status",
-    Content = "Status: " .. statusText,
+    Content = "Status: " .. State.statusText,
 })
 
 local AutoDeliveryToggle = Tabs.Jobs:AddToggle("AutoDelivery", {
     Title = "Auto Delivery Job",
-    Default = autoDelivery,
+    Default = State.autoDelivery,
 })
 
 local ModeDropdown = Tabs.Jobs:AddDropdown("DeliveryMode", {
@@ -266,84 +300,36 @@ local ModeDropdown = Tabs.Jobs:AddDropdown("DeliveryMode", {
     Description = "HighRisk (Hard) pays 33% more cash; Safe (Easy) prevents Outlaw steals",
     Values = { "HighRisk", "Safe" },
     Multi = false,
-    Default = deliveryMode == "Safe" and 2 or 1,
+    Default = State.deliveryMode == "Safe" and 2 or 1,
 })
 
 local DelaySlider = Tabs.Jobs:AddSlider("DropDelay", {
     Title = "Drop Delay (s)",
     Description = "Wait time before teleporting to dropoff",
-    Default = dropDelay,
+    Default = State.dropDelay,
     Min = 1,
     Max = 10,
     Rounding = 1,
 })
 
-AutoDeliveryToggle:OnChanged(function()
-    autoDelivery = Options.AutoDelivery.Value
-    env.DEAutoDelivery = autoDelivery
-    curTarget, curLoc, curPhase, lastTick, lastFire, dropAt = nil, nil, nil, nil, nil, nil
-    if not autoDelivery then
-        statusText = "Idle"
-        clearHover()
-    else
-        statusText = "Starting..."
-    end
-    saveCurrentSettings()
-end)
-
-ModeDropdown:OnChanged(function(val)
-    if val == "Safe" or val == "HighRisk" then
-        deliveryMode = val
-        if plr:GetAttribute("JobId") == "Delivery" and ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("SetDeliveryMode") then
-            pcall(function()
-                ReplicatedStorage.Remotes.SetDeliveryMode:FireServer(deliveryMode)
-            end)
-        end
-        saveCurrentSettings()
-    end
-end)
-
-DelaySlider:OnChanged(function(val)
-    dropDelay = tonumber(val) or 4.5
-    saveCurrentSettings()
-end)
-
-AfkToggle:OnChanged(function()
-    antiAfk = Options.AntiAfk.Value
-    saveCurrentSettings()
-end)
-
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("ConeHub")
-SaveManager:SetFolder("ConeHub/DrivingEmpire")
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-
-Window:SelectTab(1)
-pcall(function()
-    SaveManager:LoadAutoloadConfig()
-end)
-ready = true
-saveCurrentSettings()
-
 local function updateInfo()
     local ls = plr:FindFirstChild("leaderstats")
-    local curCash = (ls and ls:FindFirstChild("Cash") and ls.Cash.Value) or startCash
+    local curCash = (ls and ls:FindFirstChild("Cash") and ls.Cash.Value) or State.startCash
     local curMiles = (ls and ls:FindFirstChild("Miles") and ls.Miles.Value) or 0
     local curBounty = (ls and ls:FindFirstChild("Bounty") and ls.Bounty.Value) or 0
-    local earned = math.max(0, curCash - startCash)
-    local elapsed = math.max(1, os.clock() - sessionStart)
+    local earned = math.max(0, curCash - State.startCash)
+    local elapsed = math.max(1, os.clock() - State.sessionStart)
     local perHour = math.floor((earned / elapsed) * 3600)
     local jobAttr = tostring(plr:GetAttribute("JobId") or "None")
-    local st = delivery.GetCurrentDeliveryState()
+    local okSt, st = pcall(delivery.GetCurrentDeliveryState)
+    restoreIdentity()
+    st = okSt and st or nil
     local carried = (st and st.ItemsCarried) or 0
     local cap = (st and st.MaxCapacity) or 0
-    local car = vehicleUtil.getPlayerData(plr)
+    local car = getPlayerCar()
     local carName = (car and car.Model and car.Model.Name) or "On Foot"
 
+    restoreIdentity()
     pcall(function()
         HomeProfileBox:SetDesc(string.format(
             "Player: %s (@%s)  |  Vehicle: %s\nCash: $%s  |  Miles: %s  |  Bounty: $%s",
@@ -356,22 +342,22 @@ local function updateInfo()
         ))
         HomeSessionBox:SetDesc(string.format(
             "Status: %s  |  Job: %s (%s)\nSession Earned: +$%s ($%s/hr)\nDeliveries: %d  |  Uptime: %s",
-            statusText,
+            State.statusText,
             jobAttr,
-            deliveryMode,
+            State.deliveryMode,
             formatNumber(earned),
             formatNumber(perHour),
-            deliveriesDone,
+            State.deliveriesDone,
             formatDuration(elapsed)
         ))
         InfoBox:SetDesc(string.format(
             "Status: %s  |  Job: %s (%s)\nPackages: %d/%d  |  Completed: %d\nCash: $%s (+$%s)",
-            statusText,
+            State.statusText,
             jobAttr,
-            deliveryMode,
+            State.deliveryMode,
             carried,
             cap,
-            deliveriesDone,
+            State.deliveriesDone,
             formatNumber(curCash),
             formatNumber(earned)
         ))
@@ -380,22 +366,76 @@ end
 
 updateInfo()
 
-table.insert(conns, plr.Idled:Connect(function()
-    if antiAfk then
+AutoDeliveryToggle:OnChanged(function()
+    State.autoDelivery = Options.AutoDelivery.Value
+    env.DEAutoDelivery = State.autoDelivery
+    State.curTarget, State.curLoc, State.curPhase, State.lastTick, State.lastFire, State.dropAt = nil, nil, nil, nil, nil, nil
+    if not State.autoDelivery then
+        State.statusText = "Idle"
+        clearHover()
+    else
+        State.statusText = "Starting..."
+    end
+    updateInfo()
+    saveCurrentSettings()
+end)
+
+ModeDropdown:OnChanged(function(val)
+    if val == "Safe" or val == "HighRisk" then
+        State.deliveryMode = val
+        if plr:GetAttribute("JobId") == "Delivery" and ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("SetDeliveryMode") then
+            pcall(function()
+                ReplicatedStorage.Remotes.SetDeliveryMode:FireServer(State.deliveryMode)
+            end)
+        end
+        updateInfo()
+        saveCurrentSettings()
+    end
+end)
+
+DelaySlider:OnChanged(function(val)
+    State.dropDelay = tonumber(val) or 4.5
+    saveCurrentSettings()
+end)
+
+AfkToggle:OnChanged(function()
+    State.antiAfk = Options.AntiAfk.Value
+    saveCurrentSettings()
+end)
+
+pcall(function()
+    SaveManager:SetLibrary(Fluent)
+    InterfaceManager:SetLibrary(Fluent)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({})
+    InterfaceManager:SetFolder("ConeHub")
+    SaveManager:SetFolder("ConeHub/DrivingEmpire")
+    InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+    SaveManager:BuildConfigSection(Tabs.Settings)
+    SaveManager:LoadAutoloadConfig()
+end)
+
+Window:SelectTab(1)
+State.ready = true
+saveCurrentSettings()
+updateInfo()
+
+table.insert(State.conns, plr.Idled:Connect(function()
+    if State.antiAfk then
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new())
     end
 end))
 
 if ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("DeliveryCompleted") then
-    table.insert(conns, ReplicatedStorage.Remotes.DeliveryCompleted.OnClientEvent:Connect(function()
-        deliveriesDone += 1
+    table.insert(State.conns, ReplicatedStorage.Remotes.DeliveryCompleted.OnClientEvent:Connect(function()
+        State.deliveriesDone += 1
         updateInfo()
     end))
 end
 
-table.insert(conns, RunService.Heartbeat:Connect(function()
-    if not autoDelivery then
+table.insert(State.conns, RunService.Heartbeat:Connect(function()
+    if not State.autoDelivery then
         return
     end
     local char = plr.Character
@@ -405,14 +445,14 @@ table.insert(conns, RunService.Heartbeat:Connect(function()
     if hrp then
         hrp.Anchored = false
     end
-    if hum and hover and hover.Parent == hrp then
+    if hum and State.hover and State.hover.Parent == hrp then
         hum:ChangeState(Enum.HumanoidStateType.Freefall)
     end
 end))
 
 task.spawn(function()
-    while running do
-        if not autoDelivery then
+    while State.running do
+        if not State.autoDelivery then
             updateInfo()
             task.wait(0.25)
             continue
@@ -423,17 +463,17 @@ task.spawn(function()
 
         if hrp then
             if plr:GetAttribute("JobId") ~= "Delivery" then
-                statusText = "Starting Delivery Session..."
+                State.statusText = "Starting Delivery Session..."
                 updateInfo()
-                ReplicatedStorage.Remotes.RequestStartJobSession:FireServer("Delivery", "deliveryHub", deliveryMode)
-                curTarget, curLoc, curPhase, lastTick, dropAt = nil, nil, nil, nil, nil
+                ReplicatedStorage.Remotes.RequestStartJobSession:FireServer("Delivery", "deliveryHub", State.deliveryMode)
+                State.curTarget, State.curLoc, State.curPhase, State.lastTick, State.dropAt = nil, nil, nil, nil, nil
                 task.wait(0.5)
             else
                 local state = delivery.GetCurrentDeliveryState()
                 local target, phase
 
                 if state then
-                    lastTick = nil
+                    State.lastTick = nil
 
                     local carried = state.ItemsCarried or 0
                     local cap = state.MaxCapacity or carried
@@ -442,26 +482,26 @@ task.spawn(function()
 
                     if carried > 0 and (full or noMore) then
                         phase = "drop"
-                        dropAt = dropAt or (tick() + dropDelay)
+                        State.dropAt = State.dropAt or (tick() + State.dropDelay)
 
-                        if tick() >= dropAt then
+                        if tick() >= State.dropAt then
                             target = state.DestinationPosition
-                            statusText = string.format("Delivering (%d/%d)", carried, cap)
+                            State.statusText = string.format("Delivering (%d/%d)", carried, cap)
                         else
                             target = state.PickupPosition
-                            statusText = string.format("Waiting %.1fs (%d/%d)", math.max(0, dropAt - tick()), carried, cap)
+                            State.statusText = string.format("Waiting %.1fs (%d/%d)", math.max(0, State.dropAt - tick()), carried, cap)
                         end
                     else
-                        dropAt = nil
+                        State.dropAt = nil
                         phase = "pickup"
                         target = state.PickupPosition
-                        statusText = string.format("Collecting (%d/%d)", carried, cap)
+                        State.statusText = string.format("Collecting (%d/%d)", carried, cap)
                     end
                 else
-                    lastTick = lastTick or tick()
-                    statusText = "Finding Pickup Location..."
+                    State.lastTick = State.lastTick or tick()
+                    State.statusText = "Finding Pickup Location..."
 
-                    if tick() - lastTick > 0.25 then
+                    if tick() - State.lastTick > 0.25 then
                         local loc = getLoc(hrp.Position, true) or getLoc(hrp.Position)
                         phase = "new"
                         target = loc and loc.Position
@@ -469,20 +509,20 @@ task.spawn(function()
                 end
 
                 if target then
-                    if target ~= curTarget or phase ~= curPhase then
+                    if target ~= State.curTarget or phase ~= State.curPhase then
                         tp(CFrame.new(target + Vector3.new(0, 3.5, 0)))
-                        curTarget, curPhase = target, phase
+                        State.curTarget, State.curPhase = target, phase
                     end
 
                     local loc = getLoc(target)
 
                     if loc then
-                        if loc ~= curLoc then
+                        if loc ~= State.curLoc then
                             ReplicatedStorage.Remotes.DeliveryLocationInteracted:FireServer(loc)
-                            curLoc, lastFire = loc, tick()
-                        elseif not lastFire or tick() - lastFire > 1 then
+                            State.curLoc, State.lastFire = loc, tick()
+                        elseif not State.lastFire or tick() - State.lastFire > 1 then
                             ReplicatedStorage.Remotes.DeliveryLocationInteracted:FireServer(loc)
-                            lastFire = tick()
+                            State.lastFire = tick()
                         end
                     end
                 end
@@ -496,17 +536,23 @@ task.spawn(function()
 end)
 
 env.__DrivingEmpireCleanup = function()
-    running = false
-    autoDelivery = false
+    restoreIdentity()
+    State.running = false
+    State.autoDelivery = false
     env.DEAutoDelivery = false
     clearHover()
-    for _, c in ipairs(conns) do
+    for _, c in ipairs(State.conns) do
         pcall(function()
             c:Disconnect()
         end)
     end
-    table.clear(conns)
+    table.clear(State.conns)
     pcall(function()
         Window:Destroy()
+    end)
+    pcall(function()
+        if Fluent and Fluent.Destroy then
+            Fluent:Destroy()
+        end
     end)
 end
