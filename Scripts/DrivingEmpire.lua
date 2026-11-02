@@ -228,7 +228,9 @@ local State = {
     arrestTarget = nil,
     arrestStartedAt = 0,
     hover = nil,
+    hoverGyro = nil,
     trailerHover = nil,
+    trailerGyro = nil,
     curTarget = nil,
     curLoc = nil,
     curPhase = nil,
@@ -322,11 +324,23 @@ local function clearHover()
         end)
         State.hover = nil
     end
+    if State.hoverGyro then
+        pcall(function()
+            State.hoverGyro:Destroy()
+        end)
+        State.hoverGyro = nil
+    end
     if State.trailerHover then
         pcall(function()
             State.trailerHover:Destroy()
         end)
         State.trailerHover = nil
+    end
+    if State.trailerGyro then
+        pcall(function()
+            State.trailerGyro:Destroy()
+        end)
+        State.trailerGyro = nil
     end
 end
 
@@ -388,7 +402,9 @@ local function tp(cf, keepVelocityFree)
         restoreIdentity()
 
         local tWeight = tr and tr:FindFirstChild("Weight")
-        local weightToAtt = (tWeight and trAtt) and tWeight.CFrame:ToObjectSpace(trAtt.WorldCFrame) or nil
+        local vehAttLocalPos = (vehAtt and car.WeightPart.CFrame:PointToObjectSpace(vehAtt.WorldPosition)) or Vector3.new(0, 2.1, 9.1)
+        local rawTrLocal = (tWeight and trAtt and tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)) or Vector3.new(0, -3.14, -29.27)
+        local trAttLocalPos = Vector3.new(0, rawTrLocal.Y, rawTrLocal.Z)
 
         car.Model.PrimaryPart = car.WeightPart
         car.Model:SetPrimaryPartCFrame(cf)
@@ -401,6 +417,14 @@ local function tp(cf, keepVelocityFree)
             h.Velocity = Vector3.zero
             h.Parent = car.WeightPart
             State.hover = h
+
+            local bg = Instance.new("BodyGyro")
+            bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+            bg.P = 1e5
+            bg.D = 1e3
+            bg.CFrame = cf
+            bg.Parent = car.WeightPart
+            State.hoverGyro = bg
         end
 
         for _, v in ipairs(car.Model:GetDescendants()) do
@@ -411,11 +435,11 @@ local function tp(cf, keepVelocityFree)
         end
 
         if tr and tr.Parent and tWeight and tWeight:IsA("BasePart") then
-            if weightToAtt and vehAtt then
-                local targetAttCF = CFrame.new(vehAtt.WorldPosition) * cf.Rotation
-                tr.PrimaryPart = tWeight
-                tr:SetPrimaryPartCFrame(targetAttCF * weightToAtt:Inverse())
-            end
+            local targetHitchPos = cf:PointToWorldSpace(vehAttLocalPos)
+            local targetTrailerPos = targetHitchPos - (cf.Rotation * trAttLocalPos)
+            local trailerCF = CFrame.new(targetTrailerPos) * cf.Rotation
+            tr.PrimaryPart = tWeight
+            tr:SetPrimaryPartCFrame(trailerCF)
             tWeight.Anchored = false
 
             if not keepVelocityFree then
@@ -424,6 +448,14 @@ local function tp(cf, keepVelocityFree)
                 th.Velocity = Vector3.zero
                 th.Parent = tWeight
                 State.trailerHover = th
+
+                local tbg = Instance.new("BodyGyro")
+                tbg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+                tbg.P = 1e5
+                tbg.D = 1e3
+                tbg.CFrame = trailerCF
+                tbg.Parent = tWeight
+                State.trailerGyro = tbg
             end
 
             for _, v in ipairs(tr:GetDescendants()) do
@@ -1480,7 +1512,7 @@ task.spawn(function()
 
                     if target then
                         if target ~= State.curTarget or phase ~= State.curPhase then
-                            local yOffset = getPlayerCar() and 5 or 3.5
+                            local yOffset = isPlayerTowing() and 6.5 or (getPlayerCar() and 5 or 3.5)
                             tp(CFrame.new(target + Vector3.new(0, yOffset, 0)))
                             State.curTarget, State.curPhase = target, phase
                         end
