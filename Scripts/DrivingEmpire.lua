@@ -39,6 +39,7 @@ local collectibleSpawner = require(ReplicatedStorage.Modules.Client.CollectibleS
 local questController = require(ReplicatedStorage.Modules.Client.Quests.QuestController)
 local questUtil = require(ReplicatedStorage.Modules.Shared.Quests.QuestUtil)
 local vehicles = require(ReplicatedStorage.Modules.Client.Vehicles.VehicleController)
+local inputCtrl = require(ReplicatedStorage.Modules.Client.Vehicles.InputController)
 local vehicleUtil = require(ReplicatedStorage.Modules.Shared.Vehicles.VehicleUtil)
 local carTrailerUtil = require(ReplicatedStorage.Modules.Shared.Vehicles.CarTrailerUtil)
 local towablesUtil = require(ReplicatedStorage.Modules.Shared.Towables.TowablesUtil)
@@ -46,6 +47,19 @@ local towablesData = require(ReplicatedStorage.Modules.Shared.DataManager.Data.T
 local sharedData = require(ReplicatedStorage.Modules.Shared.Data)
 local tpGuard = require(ReplicatedStorage.Modules.Client.Exploit.VehicleTeleportDetectionController)
 restoreIdentity()
+
+local function getStudsDriven()
+    local val = 0
+    pcall(function()
+        local stats = sharedData.GetLoadedStatsFolder(plr)
+        local sd = stats and stats:FindFirstChild("Studs Driven")
+        if sd and sd:IsA("ValueBase") then
+            val = tonumber(sd.Value) or 0
+        end
+    end)
+    restoreIdentity()
+    return val
+end
 
 local function getPlayerCar()
     local ok, car = pcall(vehicleUtil.getPlayerData, plr)
@@ -233,7 +247,7 @@ local State = {
     milesBV = nil,
     milesBG = nil,
     milesAngle = 0,
-    milesPlatformY = 320,
+    milesPlatformY = 120,
     milesReturnCF = nil,
     hover = nil,
     hoverGyro = nil,
@@ -245,11 +259,13 @@ local State = {
     lastTick = nil,
     lastFire = nil,
     dropAt = nil,
+    dropStuckSince = nil,
     statusText = "Idle",
     deliveriesDone = 0,
     sessionStart = os.clock(),
     startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0,
     startMiles = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Miles") and plr.leaderstats.Miles.Value) or 0,
+    startStuds = getStudsDriven(),
     selectedLocation = "Job & Delivery Hub",
     selectedPlayer = "",
     conns = {},
@@ -414,13 +430,39 @@ local function tp(cf, keepVelocityFree)
 
         local tWeight = tr and tr:FindFirstChild("Weight")
         local vehAttLocalPos = (vehAtt and car.WeightPart.CFrame:PointToObjectSpace(vehAtt.WorldPosition)) or Vector3.new(0, 2.1, 9.1)
-        local rawTrLocal = (tWeight and trAtt and tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)) or Vector3.new(0, -3.14, -29.27)
-        local trAttLocalPos = Vector3.new(0, rawTrLocal.Y, rawTrLocal.Z)
+        local trAttLocalPos = (tWeight and trAtt and tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)) or Vector3.new(0, -3.14, -29.27)
+
+        local oldCarCF = car.WeightPart.CFrame
+        local carRel = {}
+        for _, v in ipairs(car.Model:GetDescendants()) do
+            if v:IsA("BasePart") then
+                carRel[v] = oldCarCF:ToObjectSpace(v.CFrame)
+            end
+        end
+
+        local oldTrCF = tWeight and tWeight.CFrame
+        local trRel = {}
+        if tr and tr.Parent and oldTrCF then
+            for _, v in ipairs(tr:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    trRel[v] = oldTrCF:ToObjectSpace(v.CFrame)
+                end
+            end
+        end
+
+        clearHover()
 
         car.Model.PrimaryPart = car.WeightPart
-        car.Model:SetPrimaryPartCFrame(cf)
+        car.Model:PivotTo(cf)
         car.WeightPart.Anchored = false
-        clearHover()
+
+        for v, rel in pairs(carRel) do
+            if v and v.Parent then
+                v.CFrame = cf:ToWorldSpace(rel)
+                v.AssemblyLinearVelocity = Vector3.zero
+                v.AssemblyAngularVelocity = Vector3.zero
+            end
+        end
 
         if not keepVelocityFree then
             local h = Instance.new("BodyVelocity")
@@ -438,24 +480,25 @@ local function tp(cf, keepVelocityFree)
             State.hoverGyro = bg
         end
 
-        for _, v in ipairs(car.Model:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.AssemblyLinearVelocity = Vector3.zero
-                v.AssemblyAngularVelocity = Vector3.zero
-            end
-        end
-
         if tr and tr.Parent and tWeight and tWeight:IsA("BasePart") then
             local targetHitchPos = cf:PointToWorldSpace(vehAttLocalPos)
             local targetTrailerPos = targetHitchPos - (cf.Rotation * trAttLocalPos)
             local trailerCF = CFrame.new(targetTrailerPos) * cf.Rotation
             tr.PrimaryPart = tWeight
-            tr:SetPrimaryPartCFrame(trailerCF)
+            tr:PivotTo(trailerCF)
             tWeight.Anchored = false
+
+            for v, rel in pairs(trRel) do
+                if v and v.Parent then
+                    v.CFrame = trailerCF:ToWorldSpace(rel)
+                    v.AssemblyLinearVelocity = Vector3.zero
+                    v.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
 
             if not keepVelocityFree then
                 local th = Instance.new("BodyVelocity")
-                th.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+                th.MaxForce = Vector3.new(1e5, 1e9, 1e5)
                 th.Velocity = Vector3.zero
                 th.Parent = tWeight
                 State.trailerHover = th
@@ -467,13 +510,6 @@ local function tp(cf, keepVelocityFree)
                 tbg.CFrame = trailerCF
                 tbg.Parent = tWeight
                 State.trailerGyro = tbg
-            end
-
-            for _, v in ipairs(tr:GetDescendants()) do
-                if v:IsA("BasePart") then
-                    v.AssemblyLinearVelocity = Vector3.zero
-                    v.AssemblyAngularVelocity = Vector3.zero
-                end
             end
         end
 
@@ -504,6 +540,10 @@ local function tp(cf, keepVelocityFree)
 end
 
 local function stopMilesFarm(returnToGround)
+    pcall(function()
+        inputCtrl.set("W", 0)
+    end)
+    restoreIdentity()
     if State.milesBV then
         pcall(function()
             State.milesBV:Destroy()
@@ -531,7 +571,7 @@ local function stopMilesFarm(returnToGround)
     if returnToGround then
         local char = plr.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp and hrp.Position.Y > 180 then
+        if hrp and hrp.Position.Y > 95 then
             local retCF = State.milesReturnCF or CFrame.new(80, 22, -1882)
             tp(retCF, true)
         end
@@ -638,6 +678,7 @@ Tabs.Home:AddButton({
         State.candiesCollected = 0
         State.startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0
         State.startMiles = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Miles") and plr.leaderstats.Miles.Value) or 0
+        State.startStuds = getStudsDriven()
     end,
 })
 
@@ -865,12 +906,15 @@ local function updateInfo()
     local ls = plr:FindFirstChild("leaderstats")
     local curCash = (ls and ls:FindFirstChild("Cash") and ls.Cash.Value) or State.startCash
     local curMiles = (ls and ls:FindFirstChild("Miles") and ls.Miles.Value) or 0
+    local curStuds = getStudsDriven()
+    local curMilesExact = (curStuds > 0) and (curStuds / 6445) or curMiles
+    local studsEarned = math.max(0, curStuds - State.startStuds)
+    local milesEarnedExact = studsEarned / 6445
     local curBounty = (ls and ls:FindFirstChild("Bounty") and ls.Bounty.Value) or 0
     local earned = math.max(0, curCash - State.startCash)
-    local milesEarned = math.max(0, curMiles - State.startMiles)
     local elapsed = math.max(1, os.clock() - State.sessionStart)
     local perHour = math.floor((earned / elapsed) * 3600)
-    local milesPerHourRate = math.floor((milesEarned / elapsed) * 3600)
+    local milesPerHourRate = (milesEarnedExact / elapsed) * 3600
     local jobAttr = tostring(plr:GetAttribute("JobId") or "None")
     local okSt, st = pcall(delivery.GetCurrentDeliveryState)
     restoreIdentity()
@@ -897,24 +941,24 @@ local function updateInfo()
     restoreIdentity()
     pcall(function()
         HomeProfileBox:SetDesc(string.format(
-            "Player: %s (@%s)  |  Setup: %s\nCash: $%s  |  Miles: %s (+%s)  |  Bounty: $%s (%d Stars)",
+            "Player: %s (@%s)  |  Setup: %s\nCash: $%s  |  Miles: %.2f (+%.2f)  |  Bounty: $%s (%d Stars)",
             plr.DisplayName,
             plr.Name,
             carLabel,
             formatNumber(curCash),
-            formatNumber(curMiles),
-            formatNumber(milesEarned),
+            curMilesExact,
+            milesEarnedExact,
             formatNumber(curBounty),
             stars
         ))
         HomeSessionBox:SetDesc(string.format(
-            "Status: %s  |  Job: %s\nSession Earned: +$%s ($%s/hr)  |  Miles: +%s (%s/hr)  |  Uptime: %s\nDeliveries: %d  |  ATMs: %d  |  Scenes: %d  |  Arrests: %d",
+            "Status: %s  |  Job: %s\nSession Earned: +$%s ($%s/hr)  |  Miles: +%.2f (%.1f/hr)  |  Uptime: %s\nDeliveries: %d  |  ATMs: %d  |  Scenes: %d  |  Arrests: %d",
             State.statusText,
             jobAttr,
             formatNumber(earned),
             formatNumber(perHour),
-            formatNumber(milesEarned),
-            formatNumber(milesPerHourRate),
+            milesEarnedExact,
+            milesPerHourRate,
             formatDuration(elapsed),
             State.deliveriesDone,
             State.atmsBusted,
@@ -943,12 +987,13 @@ local function updateInfo()
             formatNumber(candyBal)
         ))
         VehicleInfoBox:SetDesc(string.format(
-            "Status: %s  |  Target Speed: %d MPH\nActive Vehicle: %s  |  Total Miles: %s (+%s this session)",
+            "Status: %s  |  Target Speed: %d MPH\nActive Vehicle: %s  |  Total Miles: %.2f (+%.2f mi / +%s studs)",
             State.autoMiles and State.statusText or "Idle",
             State.milesSpeed,
             carLabel,
-            formatNumber(curMiles),
-            formatNumber(milesEarned)
+            curMilesExact,
+            milesEarnedExact,
+            formatNumber(studsEarned)
         ))
     end)
 end
@@ -990,15 +1035,15 @@ local function disableOtherModes(activeKey)
     State.updatingToggles = false
 end
 
-local function ensureTowSetup()
-    if not State.autoTrailer then
+local function ensureTowSetup(forceRecover)
+    if not State.autoTrailer and not forceRecover then
         return
     end
     local car = getPlayerCar()
     if car and isPlayerTowing() then
         return
     end
-    if tick() - State.lastTowAttempt < 4 then
+    if tick() - State.lastTowAttempt < 2.5 then
         return
     end
     local bestVeh, bestTow = findBestTowSetup()
@@ -1036,13 +1081,60 @@ local function ensureTowSetup()
     end
 
     if State.running and State.autoDelivery and not isPlayerTowing() then
-        pcall(function()
-            ReplicatedStorage.Remotes.SpawnTowable:InvokeServer(bestTow)
-        end)
-        local t1 = tick()
-        repeat
-            task.wait(0.1)
-        until not State.running or not State.autoDelivery or isPlayerTowing() or (tick() - t1 > 2.5)
+        car = getPlayerCar()
+        if car and car.Model and car.WeightPart then
+            local recAttempted = false
+            pcall(function()
+                local existingList = towablesUtil.GetPlayerTowables(plr)
+                local detached = existingList and existingList[1]
+                local tWeight = detached and detached:FindFirstChild("Weight")
+                local vehHitch = carTrailerUtil.GetHitchPart(car.Model, false)
+                local trHitch = detached and carTrailerUtil.GetHitchPart(detached, true)
+                if detached and tWeight and vehHitch and trHitch then
+                    local trAtt, vehAtt = carTrailerUtil.GetMatchingHitchAttachments(trHitch, vehHitch)
+                    if trAtt and vehAtt then
+                        recAttempted = true
+                        local flatCF = CFrame.new(car.WeightPart.Position.X, car.WeightPart.Position.Y + 3, car.WeightPart.Position.Z)
+                        local vehAttLocal = car.WeightPart.CFrame:PointToObjectSpace(vehAtt.WorldPosition)
+                        local trAttLocal = tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)
+                        tp(flatCF, true)
+                        local targetHitch = flatCF:PointToWorldSpace(vehAttLocal)
+                        local trCF = CFrame.new(targetHitch - trAttLocal)
+                        detached.PrimaryPart = tWeight
+                        detached:PivotTo(trCF)
+                        for _, v in ipairs(detached:GetDescendants()) do
+                            if v:IsA("BasePart") then
+                                v.AssemblyLinearVelocity = Vector3.zero
+                                v.AssemblyAngularVelocity = Vector3.zero
+                            end
+                        end
+                    end
+                end
+            end)
+            restoreIdentity()
+            if recAttempted then
+                local tRec = tick()
+                repeat
+                    task.wait(0.1)
+                until not State.running or not State.autoDelivery or isPlayerTowing() or (tick() - tRec > 0.7)
+            end
+        end
+
+        if not isPlayerTowing() then
+            clearHover()
+            car = getPlayerCar()
+            if car and car.Model and car.WeightPart then
+                tp(CFrame.new(80, 19, -1882), true)
+                task.wait(0.15)
+            end
+            pcall(function()
+                ReplicatedStorage.Remotes.SpawnTowable:InvokeServer(bestTow)
+            end)
+            local t1 = tick()
+            repeat
+                task.wait(0.1)
+            until not State.running or not State.autoDelivery or isPlayerTowing() or (tick() - t1 > 2.5)
+        end
     end
 
     State.spawningTow = false
@@ -1485,15 +1577,21 @@ table.insert(State.conns, RunService.Heartbeat:Connect(function(dt)
     restoreIdentity()
 
     if State.autoMiles and not State.spawningFastCar then
+        pcall(function()
+            inputCtrl.set("W", 1)
+        end)
+        restoreIdentity()
         local car = getPlayerCar()
-        if car and car.WeightPart and State.milesPlatform and State.milesBV and State.milesBG then
+        if car and car.WeightPart and State.milesPlatform then
             local stepDt = math.clamp(tonumber(dt) or 0.016, 0.001, 0.1)
             State.milesAngle = (State.milesAngle + ((State.milesSpeed / 1400) * stepDt)) % (math.pi * 2)
             local dir = Vector3.new(math.cos(State.milesAngle), 0, math.sin(State.milesAngle))
             local p = car.WeightPart.Position
             State.milesPlatform.CFrame = CFrame.new(p.X, State.milesPlatformY, p.Z)
-            State.milesBG.CFrame = CFrame.lookAt(Vector3.zero, dir)
-            State.milesBV.Velocity = dir * State.milesSpeed
+            car.WeightPart.CFrame = CFrame.lookAt(p, p + dir)
+            local velY = math.clamp(car.WeightPart.AssemblyLinearVelocity.Y, -20, 5)
+            car.WeightPart.AssemblyLinearVelocity = Vector3.new(dir.X * State.milesSpeed, velY, dir.Z * State.milesSpeed)
+            car.WeightPart.AssemblyAngularVelocity = Vector3.zero
         end
     end
 
@@ -1529,12 +1627,25 @@ task.spawn(function()
 
         if hrp then
             if State.autoMiles then
-                if not State.milesReturnCF and hrp.Position.Y < 180 then
+                if not State.milesReturnCF and hrp.Position.Y < 95 then
                     State.milesReturnCF = CFrame.new(hrp.Position.X, math.max(18, hrp.Position.Y + 4), hrp.Position.Z)
                 end
                 ensureFastestCar()
                 local car = getPlayerCar()
                 if car and car.Model and car.WeightPart then
+                    clearHover()
+                    if State.milesBV then
+                        pcall(function()
+                            State.milesBV:Destroy()
+                        end)
+                        State.milesBV = nil
+                    end
+                    if State.milesBG then
+                        pcall(function()
+                            State.milesBG:Destroy()
+                        end)
+                        State.milesBG = nil
+                    end
                     if not State.milesPlatform or not State.milesPlatform.Parent then
                         local plat = Instance.new("Part")
                         plat.Name = "ConeHub_MilesRoad"
@@ -1548,40 +1659,12 @@ task.spawn(function()
                     end
 
                     local p = car.WeightPart.Position
-                    if math.abs(p.Y - (State.milesPlatformY + 5)) > 16 or math.abs(p.X) > 6500 or math.abs(p.Z) > 6500 then
+                    if math.abs(p.Y - (State.milesPlatformY + 4.5)) > 14 or math.abs(p.X) > 6500 or math.abs(p.Z) > 6500 then
                         local spawnX = math.clamp(p.X, -1500, 1500)
                         local spawnZ = math.clamp(p.Z, -2500, 1500)
                         local dir = Vector3.new(math.cos(State.milesAngle), 0, math.sin(State.milesAngle))
                         State.milesPlatform.CFrame = CFrame.new(spawnX, State.milesPlatformY, spawnZ)
-                        tp(CFrame.lookAt(Vector3.new(spawnX, State.milesPlatformY + 5.5, spawnZ), Vector3.new(spawnX, State.milesPlatformY + 5.5, spawnZ) + dir), true)
-                    end
-
-                    if not State.milesBV or State.milesBV.Parent ~= car.WeightPart then
-                        if State.milesBV then
-                            pcall(function()
-                                State.milesBV:Destroy()
-                            end)
-                        end
-                        local bv = Instance.new("BodyVelocity")
-                        bv.MaxForce = Vector3.new(1e9, 0, 1e9)
-                        bv.Velocity = Vector3.new(State.milesSpeed, 0, 0)
-                        bv.Parent = car.WeightPart
-                        State.milesBV = bv
-                    end
-
-                    if not State.milesBG or State.milesBG.Parent ~= car.WeightPart then
-                        if State.milesBG then
-                            pcall(function()
-                                State.milesBG:Destroy()
-                            end)
-                        end
-                        local bg = Instance.new("BodyGyro")
-                        bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-                        bg.P = 1e5
-                        bg.D = 1e3
-                        bg.CFrame = car.WeightPart.CFrame.Rotation
-                        bg.Parent = car.WeightPart
-                        State.milesBG = bg
+                        tp(CFrame.lookAt(Vector3.new(spawnX, State.milesPlatformY + 4.5, spawnZ), Vector3.new(spawnX, State.milesPlatformY + 4.5, spawnZ) + dir), true)
                     end
 
                     State.statusText = string.format("Farming Miles (%s @ %d MPH)", tostring(car.VehicleId), State.milesSpeed)
@@ -1650,8 +1733,9 @@ task.spawn(function()
                     restoreIdentity()
                     state = okSt and state or nil
 
-                    if State.autoTrailer and (not state or (state.ItemsCarried or 0) == 0) then
-                        ensureTowSetup()
+                    local needsTrailer = State.autoTrailer or (state and state.IsTowing == true)
+                    if needsTrailer and not isPlayerTowing() then
+                        ensureTowSetup(true)
                         okSt, state = pcall(delivery.GetCurrentDeliveryState)
                         restoreIdentity()
                         state = okSt and state or nil
@@ -1673,18 +1757,23 @@ task.spawn(function()
 
                             if tick() >= State.dropAt then
                                 target = state.DestinationPosition
+                                State.dropStuckSince = State.dropStuckSince or tick()
                                 State.statusText = string.format("Delivering (%d/%d)", carried, cap)
                             else
                                 target = state.PickupPosition
+                                State.dropStuckSince = nil
                                 State.statusText = string.format("Waiting %.1fs (%d/%d)", math.max(0, State.dropAt - tick()), carried, cap)
                             end
                         else
                             State.dropAt = nil
+                            State.dropStuckSince = nil
                             phase = "pickup"
                             target = state.PickupPosition
                             State.statusText = string.format("Collecting (%d/%d)", carried, cap)
                         end
                     else
+                        State.dropAt = nil
+                        State.dropStuckSince = nil
                         State.lastTick = State.lastTick or tick()
                         State.statusText = "Finding Pickup Location..."
 
@@ -1696,8 +1785,9 @@ task.spawn(function()
                     end
 
                     if target then
-                        if target ~= State.curTarget or phase ~= State.curPhase then
-                            local yOffset = isPlayerTowing() and 6.5 or (getPlayerCar() and 5 or 3.5)
+                        local drifted = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(target.X, 0, target.Z)).Magnitude > 11
+                        if target ~= State.curTarget or phase ~= State.curPhase or drifted then
+                            local yOffset = isPlayerTowing() and 6.2 or (getPlayerCar() and 5 or 3.5)
                             tp(CFrame.new(target + Vector3.new(0, yOffset, 0)))
                             State.curTarget, State.curPhase = target, phase
                         end
@@ -1705,10 +1795,22 @@ task.spawn(function()
                         local loc = getLoc(target, false, (state ~= nil))
 
                         if loc then
-                            if loc ~= State.curLoc then
+                            if State.dropStuckSince and (tick() - State.dropStuckSince > 3.5) then
+                                State.dropStuckSince = tick()
+                                pcall(function()
+                                    if ReplicatedStorage.Remotes:FindFirstChild("DeliveryLocationLeft") then
+                                        ReplicatedStorage.Remotes.DeliveryLocationLeft:FireServer(loc)
+                                    end
+                                end)
+                                local yOffset = isPlayerTowing() and 5.8 or (getPlayerCar() and 4.8 or 3.5)
+                                tp(CFrame.new(target + Vector3.new(0, yOffset, 0)))
+                                task.wait(0.1)
                                 ReplicatedStorage.Remotes.DeliveryLocationInteracted:FireServer(loc)
                                 State.curLoc, State.lastFire = loc, tick()
-                            elseif not State.lastFire or tick() - State.lastFire > 1 then
+                            elseif loc ~= State.curLoc then
+                                ReplicatedStorage.Remotes.DeliveryLocationInteracted:FireServer(loc)
+                                State.curLoc, State.lastFire = loc, tick()
+                            elseif not State.lastFire or tick() - State.lastFire > 0.85 then
                                 ReplicatedStorage.Remotes.DeliveryLocationInteracted:FireServer(loc)
                                 State.lastFire = tick()
                             end
