@@ -409,6 +409,10 @@ local function tp(cf, keepVelocityFree)
     local car = getPlayerCar()
     local chassis = vehicles.getActiveChassisController()
     local tr = getAttachedTrailer()
+    if not tr then
+        local okT, list = pcall(towablesUtil.GetPlayerTowables, plr)
+        tr = (okT and type(list) == "table" and list[1]) or nil
+    end
     restoreIdentity()
 
     if car and car.Model and car.WeightPart then
@@ -421,7 +425,7 @@ local function tp(cf, keepVelocityFree)
         local vehHitch, trHitch, trAtt, vehAtt
         pcall(function()
             vehHitch = carTrailerUtil.GetHitchPart(car.Model, false)
-            trHitch = vehHitch and carTrailerUtil.GetAttachedTrailerHitch(vehHitch)
+            trHitch = (vehHitch and carTrailerUtil.GetAttachedTrailerHitch(vehHitch)) or (tr and carTrailerUtil.GetHitchPart(tr, true))
             if trHitch and vehHitch then
                 trAtt, vehAtt = carTrailerUtil.GetMatchingHitchAttachments(trHitch, vehHitch)
             end
@@ -1124,7 +1128,8 @@ local function ensureTowSetup(forceRecover)
             clearHover()
             car = getPlayerCar()
             if car and car.Model and car.WeightPart then
-                tp(CFrame.new(80, 19, -1882), true)
+                local cp = car.WeightPart.Position
+                tp(CFrame.new(cp.X, math.max(18, cp.Y + 2), cp.Z), true)
                 task.wait(0.15)
             end
             pcall(function()
