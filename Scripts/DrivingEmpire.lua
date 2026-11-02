@@ -205,6 +205,8 @@ local State = {
     autoSecurityScenes = (saved.autoSecurityScenes == true),
     autoArrestOutlaws = (saved.autoArrestOutlaws == true),
     autoCandy = (saved.autoCandy == true),
+    autoMiles = (saved.autoMiles == true),
+    milesSpeed = math.clamp(tonumber(saved.milesSpeed) or 380, 150, 450),
     autoClaimRewards = (saved.autoClaimRewards ~= false),
     antiAfk = (saved.antiAfk ~= false),
     infNitro = (saved.infNitro == true),
@@ -227,6 +229,12 @@ local State = {
     arrestsDone = 0,
     arrestTarget = nil,
     arrestStartedAt = 0,
+    milesPlatform = nil,
+    milesBV = nil,
+    milesBG = nil,
+    milesAngle = 0,
+    milesPlatformY = 320,
+    milesReturnCF = nil,
     hover = nil,
     hoverGyro = nil,
     trailerHover = nil,
@@ -241,6 +249,7 @@ local State = {
     deliveriesDone = 0,
     sessionStart = os.clock(),
     startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0,
+    startMiles = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Miles") and plr.leaderstats.Miles.Value) or 0,
     selectedLocation = "Job & Delivery Hub",
     selectedPlayer = "",
     conns = {},
@@ -298,6 +307,8 @@ local function saveCurrentSettings()
                 autoSecurityScenes = State.autoSecurityScenes,
                 autoArrestOutlaws = State.autoArrestOutlaws,
                 autoCandy = State.autoCandy,
+                autoMiles = State.autoMiles,
+                milesSpeed = State.milesSpeed,
                 autoClaimRewards = State.autoClaimRewards,
                 antiAfk = State.antiAfk,
                 infNitro = State.infNitro,
@@ -492,6 +503,42 @@ local function tp(cf, keepVelocityFree)
     end
 end
 
+local function stopMilesFarm(returnToGround)
+    if State.milesBV then
+        pcall(function()
+            State.milesBV:Destroy()
+        end)
+        State.milesBV = nil
+    end
+    if State.milesBG then
+        pcall(function()
+            State.milesBG:Destroy()
+        end)
+        State.milesBG = nil
+    end
+    if State.milesPlatform then
+        pcall(function()
+            State.milesPlatform:Destroy()
+        end)
+        State.milesPlatform = nil
+    end
+    pcall(function()
+        local oldPlat = workspace:FindFirstChild("ConeHub_MilesRoad")
+        if oldPlat then
+            oldPlat:Destroy()
+        end
+    end)
+    if returnToGround then
+        local char = plr.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and hrp.Position.Y > 180 then
+            local retCF = State.milesReturnCF or CFrame.new(80, 22, -1882)
+            tp(retCF, true)
+        end
+        State.milesReturnCF = nil
+    end
+end
+
 local function formatNumber(n)
     local s = tostring(math.floor(tonumber(n) or 0))
     return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
@@ -581,7 +628,7 @@ local AfkToggle = Tabs.Home:AddToggle("AntiAfk", {
 
 Tabs.Home:AddButton({
     Title = "Reset Session Cash & Timer",
-    Description = "Resets session cash earned, hourly rate, and elapsed timer",
+    Description = "Resets session cash earned, miles gained, hourly rate, and elapsed timer",
     Callback = function()
         State.sessionStart = os.clock()
         State.deliveriesDone = 0
@@ -590,6 +637,7 @@ Tabs.Home:AddButton({
         State.arrestsDone = 0
         State.candiesCollected = 0
         State.startCash = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Cash") and plr.leaderstats.Cash.Value) or 0
+        State.startMiles = (plr:FindFirstChild("leaderstats") and plr.leaderstats:FindFirstChild("Miles") and plr.leaderstats.Miles.Value) or 0
     end,
 })
 
@@ -669,6 +717,26 @@ local AutoCandyToggle = Tabs.Event:AddToggle("AutoCandy", {
     Title = "Auto Collect Spookfest Candy (Fastest Car)",
     Description = "Spawns your fastest owned vehicle and teleports to Spookfest2026CandyDrops & Spookfest2026Candy",
     Default = State.autoCandy,
+})
+
+local VehicleInfoBox = Tabs.Vehicle:AddParagraph({
+    Title = "Mileage & Speed Farm Status",
+    Content = "Spawns your fastest owned car (never buys anything) and drives it on a high-altitude sky circuit to farm Miles & Driving Cash.",
+})
+
+local AutoMilesToggle = Tabs.Vehicle:AddToggle("AutoMiles", {
+    Title = "Auto Farm Miles & Driving Cash (Fastest Car)",
+    Description = "Spawns your fastest owned vehicle and drives continuously on an obstacle-free sky road",
+    Default = State.autoMiles,
+})
+
+local MilesSpeedSlider = Tabs.Vehicle:AddSlider("MilesSpeed", {
+    Title = "Miles Farm Speed (MPH)",
+    Description = "Target cruising speed while farming miles & driving cash",
+    Default = State.milesSpeed,
+    Min = 150,
+    Max = 450,
+    Rounding = 0,
 })
 
 Tabs.Vehicle:AddButton({
@@ -799,8 +867,10 @@ local function updateInfo()
     local curMiles = (ls and ls:FindFirstChild("Miles") and ls.Miles.Value) or 0
     local curBounty = (ls and ls:FindFirstChild("Bounty") and ls.Bounty.Value) or 0
     local earned = math.max(0, curCash - State.startCash)
+    local milesEarned = math.max(0, curMiles - State.startMiles)
     local elapsed = math.max(1, os.clock() - State.sessionStart)
     local perHour = math.floor((earned / elapsed) * 3600)
+    local milesPerHourRate = math.floor((milesEarned / elapsed) * 3600)
     local jobAttr = tostring(plr:GetAttribute("JobId") or "None")
     local okSt, st = pcall(delivery.GetCurrentDeliveryState)
     restoreIdentity()
@@ -827,21 +897,24 @@ local function updateInfo()
     restoreIdentity()
     pcall(function()
         HomeProfileBox:SetDesc(string.format(
-            "Player: %s (@%s)  |  Setup: %s\nCash: $%s  |  Miles: %s  |  Bounty: $%s (%d Stars)",
+            "Player: %s (@%s)  |  Setup: %s\nCash: $%s  |  Miles: %s (+%s)  |  Bounty: $%s (%d Stars)",
             plr.DisplayName,
             plr.Name,
             carLabel,
             formatNumber(curCash),
             formatNumber(curMiles),
+            formatNumber(milesEarned),
             formatNumber(curBounty),
             stars
         ))
         HomeSessionBox:SetDesc(string.format(
-            "Status: %s  |  Job: %s\nSession Earned: +$%s ($%s/hr)  |  Uptime: %s\nDeliveries: %d  |  ATMs: %d  |  Scenes: %d  |  Arrests: %d",
+            "Status: %s  |  Job: %s\nSession Earned: +$%s ($%s/hr)  |  Miles: +%s (%s/hr)  |  Uptime: %s\nDeliveries: %d  |  ATMs: %d  |  Scenes: %d  |  Arrests: %d",
             State.statusText,
             jobAttr,
             formatNumber(earned),
             formatNumber(perHour),
+            formatNumber(milesEarned),
+            formatNumber(milesPerHourRate),
             formatDuration(elapsed),
             State.deliveriesDone,
             State.atmsBusted,
@@ -868,6 +941,14 @@ local function updateInfo()
             carLabel,
             State.candiesCollected,
             formatNumber(candyBal)
+        ))
+        VehicleInfoBox:SetDesc(string.format(
+            "Status: %s  |  Target Speed: %d MPH\nActive Vehicle: %s  |  Total Miles: %s (+%s this session)",
+            State.autoMiles and State.statusText or "Idle",
+            State.milesSpeed,
+            carLabel,
+            formatNumber(curMiles),
+            formatNumber(milesEarned)
         ))
     end)
 end
@@ -899,6 +980,11 @@ local function disableOtherModes(activeKey)
         if activeKey ~= "Candy" and State.autoCandy then
             State.autoCandy = false
             Options.AutoCandy:SetValue(false)
+        end
+        if activeKey ~= "Miles" and State.autoMiles then
+            State.autoMiles = false
+            Options.AutoMiles:SetValue(false)
+            stopMilesFarm(true)
         end
     end)
     State.updatingToggles = false
@@ -1155,7 +1241,7 @@ AutoDeliveryToggle:OnChanged(function()
     if State.autoDelivery then
         disableOtherModes("Delivery")
         State.statusText = "Starting Delivery..."
-    elseif not (State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy) then
+    elseif not (State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy or State.autoMiles) then
         State.statusText = "Idle"
         clearHover()
     end
@@ -1199,7 +1285,7 @@ AutoCriminalToggle:OnChanged(function()
     if State.autoCriminal then
         disableOtherModes("Criminal")
         State.statusText = "Starting Criminal Job..."
-    elseif not (State.autoDelivery or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy) then
+    elseif not (State.autoDelivery or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy or State.autoMiles) then
         State.statusText = "Idle"
         clearHover()
     end
@@ -1218,7 +1304,7 @@ AutoArrestToggle:OnChanged(function()
     if State.autoArrestOutlaws then
         disableOtherModes("Arrest")
         State.statusText = "Starting Auto Arrest..."
-    elseif not (State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoCandy) then
+    elseif not (State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoCandy or State.autoMiles) then
         State.statusText = "Idle"
         clearHover()
     end
@@ -1231,7 +1317,7 @@ AutoSecurityToggle:OnChanged(function()
     if State.autoSecurityScenes then
         disableOtherModes("Security")
         State.statusText = "Starting Security Job..."
-    elseif not (State.autoDelivery or State.autoCriminal or State.autoArrestOutlaws or State.autoCandy) then
+    elseif not (State.autoDelivery or State.autoCriminal or State.autoArrestOutlaws or State.autoCandy or State.autoMiles) then
         State.statusText = "Idle"
         clearHover()
     end
@@ -1246,10 +1332,33 @@ AutoCandyToggle:OnChanged(function()
     if State.autoCandy then
         disableOtherModes("Candy")
         State.statusText = "Starting Spookfest Candy Farm..."
-    elseif not (State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws) then
+    elseif not (State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoMiles) then
         State.statusText = "Idle"
         clearHover()
     end
+    updateInfo()
+    saveCurrentSettings()
+end)
+
+AutoMilesToggle:OnChanged(function()
+    State.autoMiles = Options.AutoMiles.Value
+    if State.autoMiles then
+        disableOtherModes("Miles")
+        clearHover()
+        State.statusText = "Starting Miles Farm..."
+    else
+        stopMilesFarm(true)
+        if not (State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy) then
+            State.statusText = "Idle"
+            clearHover()
+        end
+    end
+    updateInfo()
+    saveCurrentSettings()
+end)
+
+MilesSpeedSlider:OnChanged(function(val)
+    State.milesSpeed = math.clamp(math.floor(tonumber(val) or 380), 150, 450)
     updateInfo()
     saveCurrentSettings()
 end)
@@ -1350,16 +1459,16 @@ if ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:Fin
     end))
 end
 
-table.insert(State.conns, RunService.Heartbeat:Connect(function()
+table.insert(State.conns, RunService.Heartbeat:Connect(function(dt)
     pcall(function()
         local ch = vehicles.getActiveChassisController()
         if ch then
-            if State.infNitro then
+            if State.infNitro or State.autoMiles then
                 ch.CurrentBoostSupply = 2
                 ch.NitrousAppliedDepletionRate = 0
                 ch.NitrousReplenishRate = 10
             end
-            if State.uncapSpeed and ch.SetExternalMaxSpeedMPH then
+            if (State.uncapSpeed or State.autoMiles) and ch.SetExternalMaxSpeedMPH then
                 ch:SetExternalMaxSpeedMPH(999)
             end
             if State.torqueMult > 1 then
@@ -1375,7 +1484,20 @@ table.insert(State.conns, RunService.Heartbeat:Connect(function()
     end)
     restoreIdentity()
 
-    local anyActive = State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy
+    if State.autoMiles and not State.spawningFastCar then
+        local car = getPlayerCar()
+        if car and car.WeightPart and State.milesPlatform and State.milesBV and State.milesBG then
+            local stepDt = math.clamp(tonumber(dt) or 0.016, 0.001, 0.1)
+            State.milesAngle = (State.milesAngle + ((State.milesSpeed / 1400) * stepDt)) % (math.pi * 2)
+            local dir = Vector3.new(math.cos(State.milesAngle), 0, math.sin(State.milesAngle))
+            local p = car.WeightPart.Position
+            State.milesPlatform.CFrame = CFrame.new(p.X, State.milesPlatformY, p.Z)
+            State.milesBG.CFrame = CFrame.lookAt(Vector3.zero, dir)
+            State.milesBV.Velocity = dir * State.milesSpeed
+        end
+    end
+
+    local anyActive = State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy or State.autoMiles
     if not anyActive or State.spawningTow or State.spawningFastCar then
         return
     end
@@ -1395,7 +1517,7 @@ task.spawn(function()
     while State.running do
         checkAndClaimRewards()
 
-        local anyActive = State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy
+        local anyActive = State.autoDelivery or State.autoCriminal or State.autoSecurityScenes or State.autoArrestOutlaws or State.autoCandy or State.autoMiles
         if not anyActive then
             updateInfo()
             task.wait(0.25)
@@ -1406,7 +1528,70 @@ task.spawn(function()
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
 
         if hrp then
-            if State.autoCandy then
+            if State.autoMiles then
+                if not State.milesReturnCF and hrp.Position.Y < 180 then
+                    State.milesReturnCF = CFrame.new(hrp.Position.X, math.max(18, hrp.Position.Y + 4), hrp.Position.Z)
+                end
+                ensureFastestCar()
+                local car = getPlayerCar()
+                if car and car.Model and car.WeightPart then
+                    if not State.milesPlatform or not State.milesPlatform.Parent then
+                        local plat = Instance.new("Part")
+                        plat.Name = "ConeHub_MilesRoad"
+                        plat.Size = Vector3.new(2048, 4, 2048)
+                        plat.Anchored = true
+                        plat.CanCollide = true
+                        plat.Transparency = 1
+                        plat.CFrame = CFrame.new(car.WeightPart.Position.X, State.milesPlatformY, car.WeightPart.Position.Z)
+                        plat.Parent = workspace
+                        State.milesPlatform = plat
+                    end
+
+                    local p = car.WeightPart.Position
+                    if math.abs(p.Y - (State.milesPlatformY + 5)) > 16 or math.abs(p.X) > 6500 or math.abs(p.Z) > 6500 then
+                        local spawnX = math.clamp(p.X, -1500, 1500)
+                        local spawnZ = math.clamp(p.Z, -2500, 1500)
+                        local dir = Vector3.new(math.cos(State.milesAngle), 0, math.sin(State.milesAngle))
+                        State.milesPlatform.CFrame = CFrame.new(spawnX, State.milesPlatformY, spawnZ)
+                        tp(CFrame.lookAt(Vector3.new(spawnX, State.milesPlatformY + 5.5, spawnZ), Vector3.new(spawnX, State.milesPlatformY + 5.5, spawnZ) + dir), true)
+                    end
+
+                    if not State.milesBV or State.milesBV.Parent ~= car.WeightPart then
+                        if State.milesBV then
+                            pcall(function()
+                                State.milesBV:Destroy()
+                            end)
+                        end
+                        local bv = Instance.new("BodyVelocity")
+                        bv.MaxForce = Vector3.new(1e9, 0, 1e9)
+                        bv.Velocity = Vector3.new(State.milesSpeed, 0, 0)
+                        bv.Parent = car.WeightPart
+                        State.milesBV = bv
+                    end
+
+                    if not State.milesBG or State.milesBG.Parent ~= car.WeightPart then
+                        if State.milesBG then
+                            pcall(function()
+                                State.milesBG:Destroy()
+                            end)
+                        end
+                        local bg = Instance.new("BodyGyro")
+                        bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+                        bg.P = 1e5
+                        bg.D = 1e3
+                        bg.CFrame = car.WeightPart.CFrame.Rotation
+                        bg.Parent = car.WeightPart
+                        State.milesBG = bg
+                    end
+
+                    State.statusText = string.format("Farming Miles (%s @ %d MPH)", tostring(car.VehicleId), State.milesSpeed)
+                else
+                    State.statusText = "Waiting for Fastest Car..."
+                end
+                updateInfo()
+                task.wait(0.25)
+
+            elseif State.autoCandy then
                 ensureFastestCar()
                 local pos = hrp.Position
                 local okD, dropPos = pcall(collectibleSpawner.GetNearestAvailable, "Spookfest2026CandyDrops", pos)
@@ -1732,7 +1917,9 @@ env.__DrivingEmpireCleanup = function()
     State.autoSecurityScenes = false
     State.autoArrestOutlaws = false
     State.autoCandy = false
+    State.autoMiles = false
     env.DEAutoDelivery = false
+    stopMilesFarm(false)
     clearHover()
     for _, c in ipairs(State.conns) do
         pcall(function()
