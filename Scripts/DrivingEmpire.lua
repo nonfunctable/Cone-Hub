@@ -253,6 +253,11 @@ local State = {
     hoverGyro = nil,
     trailerHover = nil,
     trailerGyro = nil,
+    hoverCF = nil,
+    trailerHoverCF = nil,
+    origCollide = setmetatable({}, { __mode = "k" }),
+    coreRestRel = setmetatable({}, { __mode = "k" }),
+    trAttCache = setmetatable({}, { __mode = "k" }),
     curTarget = nil,
     curLoc = nil,
     curPhase = nil,
@@ -344,7 +349,61 @@ if getconnections then
     end)
 end
 
-local function clearHover()
+local function restoreCollisions()
+    for part, orig in pairs(State.origCollide) do
+        if part and part.Parent then
+            pcall(function()
+                part.CanCollide = orig
+            end)
+        end
+        State.origCollide[part] = nil
+    end
+end
+
+local function disableModelCollisions(model)
+    if not model then
+        return
+    end
+    for _, v in ipairs(model:GetDescendants()) do
+        if v:IsA("BasePart") then
+            if State.origCollide[v] == nil then
+                State.origCollide[v] = v.CanCollide
+            end
+            v.CanCollide = false
+        end
+    end
+end
+
+local function getCoreRestOffsets(model, rootPart)
+    if not model or not rootPart then
+        return {}
+    end
+    local cached = State.coreRestRel[model]
+    if not cached then
+        cached = {}
+        local rootCF = rootPart.CFrame
+        local core = model:FindFirstChild("Core")
+        if core then
+            for _, v in ipairs(core:GetDescendants()) do
+                if v:IsA("BasePart") and (v.Position - rootCF.Position).Magnitude < 45 then
+                    cached[v] = rootCF:ToObjectSpace(v.CFrame)
+                end
+            end
+        end
+        local keepAwake = model:FindFirstChild("KeepAwakePart")
+        if keepAwake and keepAwake:IsA("BasePart") and (keepAwake.Position - rootCF.Position).Magnitude < 45 then
+            cached[keepAwake] = rootCF:ToObjectSpace(keepAwake.CFrame)
+        end
+        if next(cached) ~= nil then
+            State.coreRestRel[model] = cached
+        end
+    end
+    return cached
+end
+
+local function clearHover(keepCollisionsDisabled)
+    State.hoverCF = nil
+    State.trailerHoverCF = nil
     if State.hover then
         pcall(function()
             State.hover:Destroy()
@@ -368,6 +427,9 @@ local function clearHover()
             State.trailerGyro:Destroy()
         end)
         State.trailerGyro = nil
+    end
+    if not keepCollisionsDisabled then
+        restoreCollisions()
     end
 end
 
@@ -433,44 +495,56 @@ local function tp(cf, keepVelocityFree)
         restoreIdentity()
 
         local tWeight = tr and tr:FindFirstChild("Weight")
-        local vehAttLocalPos = (vehAtt and car.WeightPart.CFrame:PointToObjectSpace(vehAtt.WorldPosition)) or Vector3.new(0, 2.1, 9.1)
-        local trAttLocalPos = (tWeight and trAtt and tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)) or Vector3.new(0, -3.14, -29.27)
+        local vehAttLocalPos = (vehAtt and vehAtt.Parent == car.WeightPart and vehAtt.Position)
+            or (vehAtt and car.WeightPart.CFrame:PointToObjectSpace(vehAtt.WorldPosition))
+            or Vector3.new(0, 2.1, 9.1)
 
-        local oldCarCF = car.WeightPart.CFrame
-        local carRel = {}
+        local trAttLocalPos = tr and State.trAttCache[tr]
+        if not trAttLocalPos and tWeight and trAtt then
+            local rawLocal = tWeight.CFrame:PointToObjectSpace(trAtt.WorldPosition)
+            if rawLocal.Magnitude < 45 then
+                trAttLocalPos = Vector3.new(0, rawLocal.Y, rawLocal.Z)
+                State.trAttCache[tr] = trAttLocalPos
+            end
+        end
+        trAttLocalPos = trAttLocalPos or Vector3.new(0, -3.14, -29.27)
+
+        local carCoreRel = getCoreRestOffsets(car.Model, car.WeightPart)
+        local trCoreRel = (tr and tWeight) and getCoreRestOffsets(tr, tWeight) or {}
+
+        clearHover(not keepVelocityFree)
+
+        if not keepVelocityFree then
+            disableModelCollisions(car.Model)
+            if tr and tr.Parent then
+                disableModelCollisions(tr)
+            end
+        end
+
         for _, v in ipairs(car.Model:GetDescendants()) do
             if v:IsA("BasePart") then
-                carRel[v] = oldCarCF:ToObjectSpace(v.CFrame)
+                v.AssemblyLinearVelocity = Vector3.zero
+                v.AssemblyAngularVelocity = Vector3.zero
             end
         end
-
-        local oldTrCF = tWeight and tWeight.CFrame
-        local trRel = {}
-        if tr and tr.Parent and oldTrCF then
-            for _, v in ipairs(tr:GetDescendants()) do
-                if v:IsA("BasePart") then
-                    trRel[v] = oldTrCF:ToObjectSpace(v.CFrame)
-                end
-            end
-        end
-
-        clearHover()
 
         car.Model.PrimaryPart = car.WeightPart
-        car.Model:PivotTo(cf)
+        car.Model:SetPrimaryPartCFrame(cf)
         car.WeightPart.Anchored = false
 
-        for v, rel in pairs(carRel) do
+        for v, rel in pairs(carCoreRel) do
             if v and v.Parent then
-                v.CFrame = cf:ToWorldSpace(rel)
+                v.CFrame = cf * rel
                 v.AssemblyLinearVelocity = Vector3.zero
                 v.AssemblyAngularVelocity = Vector3.zero
             end
         end
 
         if not keepVelocityFree then
+            State.hoverCF = cf
             local h = Instance.new("BodyVelocity")
             h.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            h.P = 1e6
             h.Velocity = Vector3.zero
             h.Parent = car.WeightPart
             State.hover = h
@@ -478,7 +552,7 @@ local function tp(cf, keepVelocityFree)
             local bg = Instance.new("BodyGyro")
             bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
             bg.P = 1e5
-            bg.D = 1e3
+            bg.D = 2e3
             bg.CFrame = cf
             bg.Parent = car.WeightPart
             State.hoverGyro = bg
@@ -488,28 +562,38 @@ local function tp(cf, keepVelocityFree)
             local targetHitchPos = cf:PointToWorldSpace(vehAttLocalPos)
             local targetTrailerPos = targetHitchPos - (cf.Rotation * trAttLocalPos)
             local trailerCF = CFrame.new(targetTrailerPos) * cf.Rotation
+
+            for _, v in ipairs(tr:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.AssemblyLinearVelocity = Vector3.zero
+                    v.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+
             tr.PrimaryPart = tWeight
-            tr:PivotTo(trailerCF)
+            tr:SetPrimaryPartCFrame(trailerCF)
             tWeight.Anchored = false
 
-            for v, rel in pairs(trRel) do
+            for v, rel in pairs(trCoreRel) do
                 if v and v.Parent then
-                    v.CFrame = trailerCF:ToWorldSpace(rel)
+                    v.CFrame = trailerCF * rel
                     v.AssemblyLinearVelocity = Vector3.zero
                     v.AssemblyAngularVelocity = Vector3.zero
                 end
             end
 
             if not keepVelocityFree then
+                State.trailerHoverCF = trailerCF
                 local th = Instance.new("BodyVelocity")
                 th.MaxForce = Vector3.new(1e5, 1e9, 1e5)
+                th.P = 1e6
                 th.Velocity = Vector3.zero
                 th.Parent = tWeight
                 State.trailerHover = th
 
                 local tbg = Instance.new("BodyGyro")
-                tbg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-                tbg.P = 1e5
+                tbg.MaxTorque = Vector3.new(1e7, 1e7, 1e7)
+                tbg.P = 2e4
                 tbg.D = 1e3
                 tbg.CFrame = trailerCF
                 tbg.Parent = tWeight
@@ -1604,6 +1688,28 @@ table.insert(State.conns, RunService.Heartbeat:Connect(function(dt)
     if not anyActive or State.spawningTow or State.spawningFastCar then
         return
     end
+
+    if State.hoverCF and not State.autoMiles then
+        local car = getPlayerCar()
+        if car and car.Model and car.WeightPart then
+            car.WeightPart.AssemblyLinearVelocity = Vector3.zero
+            car.WeightPart.AssemblyAngularVelocity = Vector3.zero
+            if State.trailerHoverCF then
+                local tr = getAttachedTrailer()
+                if not tr then
+                    local okT, list = pcall(towablesUtil.GetPlayerTowables, plr)
+                    tr = (okT and type(list) == "table" and list[1]) or nil
+                end
+                restoreIdentity()
+                local tWeight = tr and tr:FindFirstChild("Weight")
+                if tWeight and tWeight:IsA("BasePart") then
+                    tWeight.AssemblyLinearVelocity = Vector3.zero
+                    tWeight.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+        end
+    end
+
     local char = plr.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1790,11 +1896,24 @@ task.spawn(function()
                     end
 
                     if target then
-                        local drifted = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(target.X, 0, target.Z)).Magnitude > 11
-                        if target ~= State.curTarget or phase ~= State.curPhase or drifted then
-                            local yOffset = isPlayerTowing() and 6.2 or (getPlayerCar() and 5 or 3.5)
-                            tp(CFrame.new(target + Vector3.new(0, yOffset, 0)))
+                        local yOffset = isPlayerTowing() and 8 or (getPlayerCar() and 5.5 or 3.5)
+                        local desiredPos = target + Vector3.new(0, yOffset, 0)
+                        local car = getPlayerCar()
+                        local refPos = (car and car.WeightPart and car.WeightPart.Position) or hrp.Position
+                        local drifted = (refPos - desiredPos).Magnitude > 8
+                        if not drifted and isPlayerTowing() then
+                            local tr = getAttachedTrailer()
+                            local tw = tr and tr:FindFirstChild("Weight")
+                            if tw and (refPos - tw.Position).Magnitude > 46 then
+                                drifted = true
+                            end
+                        end
+                        local targetChanged = not State.curTarget or (target - State.curTarget).Magnitude > 1.5
+                        if targetChanged or drifted then
+                            tp(CFrame.new(desiredPos))
                             State.curTarget, State.curPhase = target, phase
+                        else
+                            State.curPhase = phase
                         end
 
                         local loc = getLoc(target, false, (state ~= nil))
