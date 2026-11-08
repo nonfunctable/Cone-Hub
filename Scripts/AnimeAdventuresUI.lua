@@ -286,9 +286,30 @@ local function setLowGraphics(on)
 	end)
 end
 
+local blackOverlay
 local function set3D(disabled)
 	pcall(function()
 		RunService:Set3dRenderingEnabled(not disabled)
+	end)
+	pcall(function()
+		if disabled then
+			if not (blackOverlay and blackOverlay.Parent) then
+				blackOverlay = Instance.new("ScreenGui")
+				blackOverlay.Name = "ConeHub_AA_Black"
+				blackOverlay.DisplayOrder = -2147483647
+				blackOverlay.IgnoreGuiInset = true
+				blackOverlay.ResetOnSpawn = false
+				local f = Instance.new("Frame")
+				f.Size = UDim2.fromScale(1, 1)
+				f.BackgroundColor3 = Color3.new(0, 0, 0)
+				f.BorderSizePixel = 0
+				f.Parent = blackOverlay
+				blackOverlay.Parent = LocalPlayer:WaitForChild("PlayerGui")
+			end
+		elseif blackOverlay then
+			blackOverlay:Destroy()
+			blackOverlay = nil
+		end
 	end)
 end
 
@@ -340,6 +361,9 @@ end)
 
 env.__ConeAAUICleanup = function()
 	alive = false
+	if blackOverlay then
+		pcall(set3D, false)
+	end
 	setAntiAfk(false)
 	for _, c in ipairs(conns) do
 		pcall(function()
@@ -358,7 +382,7 @@ local Tabs = {
 	Teams = Window:AddTab({ Title = "Teams", Icon = "users" }),
 	Play = Window:AddTab({ Title = "Auto Play", Icon = "play" }),
 	Webhook = Window:AddTab({ Title = "Webhook", Icon = "bell" }),
-	Misc = Window:AddTab({ Title = "Misc", Icon = "zap" }),
+	Misc = Window:AddTab({ Title = "Misc", Icon = "sliders-horizontal" }),
 	Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
 }
 local Options = Fluent.Options
@@ -398,7 +422,7 @@ local HomeStats = Tabs.Home.AddStatCard and Tabs.Home:AddStatCard("AAHomeStats",
 	},
 }) or nil
 
-divider(Tabs.Home, "Quick Controls", "zap")
+divider(Tabs.Home, "Quick Controls", "gauge")
 
 bindToggle(Tabs.Home, "AAMaster", "enabled", "Auto Farm", "Master switch: queues in the lobby and auto-plays matches", function()
 	syncEngine()
@@ -653,21 +677,42 @@ task.delay(2.5, syncEngine)
 
 local uiStart = os.time()
 
+local function recolorTiles()
+	if not (HomeStats and HomeStats.Tiles and HomeStats.Tiles[1]) then
+		return
+	end
+	local textColor = HomeStats.Tiles[1].ValueLabel.TextColor3
+	for _, tile in ipairs(HomeStats.Tiles) do
+		if tile.SubLabel then
+			tile.SubLabel.TextColor3 = textColor
+		end
+		if tile.Key == "Wallet" then
+			tile.ValueLabel.TextColor3 = textColor
+		elseif tile.IconImage then
+			tile.IconImage.ImageColor3 = textColor
+			if tile.IconImage.Parent then
+				tile.IconImage.Parent.BackgroundColor3 = textColor
+			end
+		end
+	end
+end
+
 local function refresh()
+	pcall(recolorTiles)
 	local st = engineState()
 	local stats = st and st.stats or {}
 	local running = st and st.running
 
 	if HomeStats then
-		HomeStats:SetStat("Status", running and "Running" or "Stopped", prettyAction(stats.lastAction))
+		HomeStats:SetStat("Status", running and "Running" or "Stopped", "")
 		local wave = workspace:FindFirstChild("_wave_num")
-		HomeStats:SetStat("Where", inLobby() and "Lobby" or "Match", inLobby() and (st and st.queuedLevelId or "not queued") or ("Wave " .. tostring(wave and wave.Value or 0)))
+		HomeStats:SetStat("Where", inLobby() and "Lobby" or "Match", inLobby() and ((st and st.queuedLevelId == "__DAILY_CHALLENGE") and "Daily" or (st and st.queuedLevelId) and "Summer" or "") or ("Wave " .. tostring(wave and wave.Value or 0)))
 		local sess = AA and AA.getSessionStats and AA.getSessionStats() or {}
 		HomeStats:SetStat("Session", string.format("%dW / %dL", sess.wins or 0, sess.losses or 0), fmtTime(os.time() - (sess.sessionStart or uiStart)))
 		local pearls = statValue("_resourceSummerPearls")
 		local snap = st and st.matchStartSnapshot
 		local gained = (not inLobby() and snap and snap.summerPearls and snap.summerPearls > 0) and (pearls - snap.summerPearls) or nil
-		HomeStats:SetStat("Wallet", fmtNum(pearls), gained and ("+" .. fmtNum(gained) .. " this match") or "")
+		HomeStats:SetStat("Wallet", fmtNum(pearls), gained and ("+" .. fmtNum(gained)) or "")
 	end
 
 	ActivityBox:SetDesc(string.format(

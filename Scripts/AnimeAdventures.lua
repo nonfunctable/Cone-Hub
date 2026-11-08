@@ -1335,6 +1335,33 @@ local function captureMatchStartSnapshot(lp)
 	}
 end
 
+local function readMatchVictory()
+	local reg = AnimeAdventures.getRegistries()
+	local gui = reg and reg.ClientServices.GUIService and reg.ClientServices.GUIService.module
+	local rui = gui and gui.results_ui
+	if not rui then
+		return nil
+	end
+	for _ = 1, 50 do
+		local s = rui.settings
+		if type(s) == "table" and type(s.victory) == "boolean" then
+			return s.victory
+		end
+		local okT, winOn, loseOn = pcall(function()
+			local tw, tl = rui.TitleWin, rui.TitleLose
+			local function on(x)
+				return x:IsA("GuiObject") and x.Visible or x.Enabled
+			end
+			return on(tw), on(tl)
+		end)
+		if okT and winOn ~= loseOn then
+			return winOn == true
+		end
+		task.wait(0.1)
+	end
+	return nil
+end
+
 local function sendRoundSummaryWebhook(AA, state)
 	local lp = Players.LocalPlayer
 	if not lp then
@@ -1357,7 +1384,13 @@ local function sendRoundSummaryWebhook(AA, state)
 	local diffGold = math.max(0, curGold - (snap.gold or curGold))
 	local diffXp = math.max(0, math.floor(curXpTotal - (snap.xp or curXpTotal)))
 
-	local won = (wave >= 50) or (diffPearls >= 300)
+	local victory = readMatchVictory()
+	local won
+	if victory ~= nil then
+		won = victory
+	else
+		won = (wave >= 50) or (diffPearls >= 300)
+	end
 	state.matchStartSnapshot = nil
 
 	local levelNum, curXpBar, reqXpBar = getPlayerLevelAndXpText(lp)
