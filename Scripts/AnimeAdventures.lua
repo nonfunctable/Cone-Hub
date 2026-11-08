@@ -107,7 +107,55 @@ function AnimeAdventures.invokeServer(endpointName, ...)
 	return remote:InvokeServer(...)
 end
 
-function AnimeAdventures.joinAndStartSummerEvent(useMatchmaking, state)
+local DAILY_LEVEL_ID = "__DAILY_CHALLENGE"
+
+function AnimeAdventures.getProfileData()
+	local reg = AnimeAdventures.getRegistries()
+	local csc = reg and reg.ClientServices.ChallengeServiceClient and reg.ClientServices.ChallengeServiceClient.module
+	return csc and csc.session and csc.session.profile_data, csc
+end
+
+function AnimeAdventures.isDailyChallengePending()
+	local pd, csc = AnimeAdventures.getProfileData()
+	local cur = csc and csc._CURRENT_DAILY_CHALLENGE
+	if not pd or not cur or cur.current_uuid == nil then
+		return false
+	end
+	return cur.current_uuid ~= pd.last_completed_daily_challenge_uuid
+end
+
+function AnimeAdventures.ensureTeamLoadout(idx)
+	idx = tostring(idx)
+	local pd = AnimeAdventures.getProfileData()
+	local lo = pd and pd.loadouts_v2 and pd.loadouts_v2[idx]
+	if not lo or not lo.saved_equipped or next(lo.saved_equipped) == nil then
+		return false
+	end
+	local reg = AnimeAdventures.getRegistries()
+	local ucsc = reg and reg.ClientServices.UnitCollectionServiceClient and reg.ClientServices.UnitCollectionServiceClient.module
+	local cpd = ucsc and ucsc.session and ucsc.session.collection and ucsc.session.collection.collection_profile_data
+	local equipped, have = {}, 0
+	for _, u in pairs((cpd and cpd.equipped_units) or {}) do
+		equipped[u] = true
+		have += 1
+	end
+	local matches, want = true, 0
+	for _, u in pairs(lo.saved_equipped) do
+		want += 1
+		if not equipped[u] then
+			matches = false
+		end
+	end
+	if matches and have == want then
+		return true
+	end
+	pcall(AnimeAdventures.invokeServer, "load_team_loadout", idx)
+	task.wait(1)
+	return true
+end
+
+function AnimeAdventures.joinAndStartSummerEvent(useMatchmaking, state, levelId)
+	levelId = levelId or SUMMER_LEVEL_ID
 	local reg = AnimeAdventures.getRegistries()
 	local gui = reg and reg.ClientServices.GUIService and reg.ClientServices.GUIService.module
 
@@ -124,14 +172,23 @@ function AnimeAdventures.joinAndStartSummerEvent(useMatchmaking, state)
 		local mmUI = gui and gui.matchmaking_ui
 		local mmEnabled = mmUI and mmUI.screenGUI and mmUI.screenGUI.Enabled
 		local now = tick()
+		if mmEnabled and state and state.queuedLevelId and state.queuedLevelId ~= levelId then
+			pcall(AnimeAdventures.invokeServer, "leave_matchmaking")
+			pcall(function()
+				mmUI.screenGUI.Enabled = false
+			end)
+			mmEnabled = false
+			task.wait(0.5)
+		end
 		if not mmEnabled or (now - (state and state.lastMatchmakeQueueTime or 0)) >= 45 then
 			if state then
 				state.lastMatchmakeQueueTime = now
+				state.queuedLevelId = levelId
 			end
-			local res = AnimeAdventures.invokeServer("request_matchmaking", SUMMER_LEVEL_ID)
+			local res = AnimeAdventures.invokeServer("request_matchmaking", levelId)
 			pcall(function()
 				if mmUI and not mmUI.screenGUI.Enabled then
-					mmUI:show(SUMMER_LEVEL_ID)
+					mmUI:show(levelId)
 				end
 			end)
 			return res
@@ -176,6 +233,11 @@ local DEFAULT_CONFIG = {
 	TARGET_ERWIN_COUNT = 4,
 	SMART_TIMESTOP = true,
 	RETURN_TO_LOBBY = true,
+	AUTO_DAILY_CHALLENGE = false,
+	AUTO_SWITCH_TEAMS = false,
+	DAILY_TEAM_SLOT = "1",
+	SUMMER_TEAM_SLOT = "2",
+	DIFFICULTY = "Hard",
 }
 
 local function getConfig()
@@ -938,8 +1000,14 @@ local function findValidPlacementCFrame(AA, uinfo, mode, targetWpIdx, failedPosi
 	return nil, nil
 end
 
+local MAIN_FARM_UNITS = {
+	speedwagon = true,
+	bulma = true,
+	bulma_evolved = true,
+}
+
 local function isFarmUnit(AA, unitId, uinfo)
-	if unitId == "speedwagon" or unitId == "bulma" or unitId == "bulma_evolved" then
+	if MAIN_FARM_UNITS[unitId] then
 		return true
 	end
 	if not uinfo then
@@ -1362,9 +1430,16 @@ local function sendRoundSummaryWebhook(AA, state)
 		or (type(http_request) == "function" and http_request)
 		or (syn and type(syn.request) == "function" and syn.request)
 		or (http and type(http.request) == "function" and http.request)
-	if reqFn and type(WEBHOOK_URL) == "string" and #WEBHOOK_URL > 10 then
+	if getConfig().WEBHOOK_ENABLED == false then
+		return
+	end
+	local url = getConfig().WEBHOOK_URL
+	if type(url) ~= "string" or url == "" then
+		url = (getgenv and getgenv().AA_WEBHOOK_URL) or WEBHOOK_URL
+	end
+	if reqFn and type(url) == "string" and #url > 10 then
 		reqFn({
-			Url = WEBHOOK_URL,
+			Url = url,
 			Method = "POST",
 			Headers = { ["Content-Type"] = "application/json" },
 			Body = HttpService:JSONEncode(payload),
@@ -1373,6 +1448,10 @@ local function sendRoundSummaryWebhook(AA, state)
 end
 
 local function attachToAnimeAdventures(AA)
+	AA.getSessionStats = loadSessionStats
+	AA.getDefaultConfig = function()
+		return DEFAULT_CONFIG
+	end
 	AA.AutoSummerEvent = AA.AutoSummerEvent or {
 		running = false,
 		stats = {
@@ -1395,8 +1474,24 @@ local function attachToAnimeAdventures(AA)
 		local cfg = getConfig()
 
 		if game.PlaceId == LOBBY_PLACE_ID then
-			state.stats.lastAction = "lobby_matchmaking_summer"
-			AA.joinAndStartSummerEvent(cfg.USE_MATCHMAKING ~= false, state)
+			if cfg.AUTO_QUEUE == false then
+				state.stats.lastAction = "lobby_idle"
+				return "lobby"
+			end
+			local switchTeams = cfg.AUTO_SWITCH_TEAMS == true
+			if cfg.AUTO_DAILY_CHALLENGE == true and AA.isDailyChallengePending() then
+				state.stats.lastAction = "lobby_matchmaking_daily"
+				if switchTeams then
+					AA.ensureTeamLoadout(cfg.DAILY_TEAM_SLOT or DEFAULT_CONFIG.DAILY_TEAM_SLOT)
+				end
+				AA.joinAndStartSummerEvent(true, state, DAILY_LEVEL_ID)
+			else
+				state.stats.lastAction = "lobby_matchmaking_summer"
+				if switchTeams then
+					AA.ensureTeamLoadout(cfg.SUMMER_TEAM_SLOT or DEFAULT_CONFIG.SUMMER_TEAM_SLOT)
+				end
+				AA.joinAndStartSummerEvent(cfg.USE_MATCHMAKING ~= false, state)
+			end
 			return "lobby"
 		end
 
@@ -1480,7 +1575,7 @@ local function attachToAnimeAdventures(AA)
 		local diffFolder = dataFolder:FindFirstChild("Difficulty")
 		if diffFolder and diffFolder:FindFirstChild("DifficultyDecided") and not diffFolder.DifficultyDecided.Value then
 			pcall(function()
-				AA.invokeServer("select_difficulty", "Hard")
+				AA.invokeServer("select_difficulty", cfg.DIFFICULTY or "Hard")
 			end)
 			return "waiting_difficulty"
 		end
@@ -1707,7 +1802,6 @@ local function attachToAnimeAdventures(AA)
 		local hasCarrot = placed.carrotEntry ~= nil
 		local hasIdol = placed.idolEntry ~= nil
 		local totalFarmsPlaced = #placed.farms
-		local speedwagonCount = placed.byId["speedwagon"] or 0
 		local myErwinCount = #placed.erwins
 		local globalErwinCount = getGlobalUnitCountById("erwin")
 		local targetErwins = math.min(cfg.TARGET_ERWIN_COUNT or 4, 6 - math.max(0, globalErwinCount - myErwinCount))
@@ -1788,11 +1882,12 @@ local function attachToAnimeAdventures(AA)
 
 				if ds.isFarm then
 					placementMode = "farm"
-					if unitId == "speedwagon" then
-						if speedwagonCount == 0 and wave <= 2 then
+					if MAIN_FARM_UNITS[unitId] then
+						local mainFarmCount = placed.byId[unitId] or 0
+						if mainFarmCount == 0 and wave <= 2 then
 							spawnPriority = 1000
-						elseif speedwagonCount < unitCap and (hasFrontCarryPlaced or wave >= 2) and wave <= 20 then
-							spawnPriority = 850 - speedwagonCount * 30
+						elseif mainFarmCount < unitCap and (hasFrontCarryPlaced or wave >= 2) and wave <= 20 then
+							spawnPriority = 850 - mainFarmCount * 30
 						end
 					elseif placedCount < unitCap and wave <= 20 then
 						if totalFarmsPlaced == 0 and tonumber(uinfo.cost or 9999) <= 650 and wave <= 2 then
@@ -1964,7 +2059,7 @@ local function attachToAnimeAdventures(AA)
 			if nextCost and entry.upgrade < entry.maxUpgrade then
 				local priority = 0
 
-				if entry.id == "speedwagon" and (hasVego or #placed.dps >= 1) and wave <= 20 then
+				if MAIN_FARM_UNITS[entry.id] and (hasVego or #placed.dps >= 1) and wave <= 20 then
 					priority = 1350 - (nextCost / 200)
 				elseif entry.isFarm and (#placed.dps >= 1) and wave <= 20 and nextCost <= 3500 then
 					priority = 1340 - (nextCost / 200)
@@ -2314,7 +2409,7 @@ task.spawn(function()
 		game.Loaded:Wait()
 	end
 	local lp = Players.LocalPlayer or Players.PlayerAdded:Wait()
-	if lp and (not ALLOWED_SUMMER_USERNAME or lp.Name == ALLOWED_SUMMER_USERNAME) then
+	if lp and (not ALLOWED_SUMMER_USERNAME or lp.Name == ALLOWED_SUMMER_USERNAME) and not getgenv().AA_NO_AUTOSTART then
 		task.wait(2)
 		AnimeAdventures.startAutoSummerEvent()
 	end
